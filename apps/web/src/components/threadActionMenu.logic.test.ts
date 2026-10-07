@@ -117,6 +117,35 @@ describe("buildThreadActionMenuItems", () => {
     expect(items[copyIndex + 2]?.id).toBe("archive");
   });
 
+  it("places fork items right after Rename and gates them", () => {
+    expect(ids(baseState)).not.toContain("fork-here");
+    const fork = { canFork: true, worktreeBaseBranch: "main" };
+    const items = buildThreadActionMenuItems({ ...baseState, fork });
+    const renameIndex = items.findIndex((item) => item.id === "rename");
+    expect(items.slice(renameIndex + 1, renameIndex + 3)).toMatchObject([
+      { id: "fork-here", label: "Fork here", disabled: false },
+      { id: "fork-in-worktree", label: "Fork in new worktree…", disabled: false },
+    ]);
+    const blocked = buildThreadActionMenuItems({
+      ...baseState,
+      fork: { canFork: false, worktreeBaseBranch: null },
+    });
+    expect(blocked.find((item) => item.id === "fork-here")?.disabled).toBe(true);
+    expect(blocked.map((item) => item.id)).not.toContain("fork-in-worktree");
+  });
+
+  it("offers working directory and branch name copies, branch only when present", () => {
+    const copyChildren = (branch: string | null) =>
+      buildThreadActionMenuItems({ ...baseState, branch }).find((item) => item.id === "copy")
+        ?.children;
+    expect(copyChildren(null)?.map((c) => c.label)).toEqual(["Working directory", "Thread ID"]);
+    expect(copyChildren("main")?.map((c) => c.label)).toEqual([
+      "Working directory",
+      "Branch name",
+      "Thread ID",
+    ]);
+  });
+
   it("offers project filtering only for surfaces with a scoped thread list", () => {
     expect(ids(baseState)).not.toContain("filter-by-project");
     expect(

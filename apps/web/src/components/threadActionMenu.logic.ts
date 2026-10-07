@@ -21,6 +21,8 @@ export type ThreadActionMenuId =
   | `snooze:${string}`
   | "unsnooze"
   | "rename"
+  | "fork-here"
+  | "fork-in-worktree"
   | "regenerate-title"
   | "mark-unread"
   | "copy"
@@ -99,6 +101,15 @@ export interface ThreadActionMenuState {
     readonly titleRegeneration: boolean;
   };
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
+  /**
+   * Thread forking. Omitted on surfaces that cannot fork. `canFork` is false
+   * while the thread has no finished run or is still running; the worktree
+   * item shows only with a base branch (git project, source-control access).
+   */
+  readonly fork?: {
+    readonly canFork: boolean;
+    readonly worktreeBaseBranch: string | null;
+  };
 }
 
 /** Local navigation, read markers, and copying remain available to read-only clients. */
@@ -169,6 +180,26 @@ export function buildThreadActionMenuItems(
         ]
       : []),
     { id: "rename", label: "Rename thread", icon: "pencil", separatorBefore: true },
+    ...(state.fork
+      ? [
+          {
+            id: "fork-here" as const,
+            label: "Fork here",
+            icon: "git-branch",
+            disabled: !state.fork.canFork,
+          },
+          ...(state.fork.worktreeBaseBranch
+            ? [
+                {
+                  id: "fork-in-worktree" as const,
+                  label: "Fork in new worktree…",
+                  icon: "git-branch",
+                  disabled: !state.fork.canFork,
+                },
+              ]
+            : []),
+        ]
+      : []),
     ...(state.supports.titleRegeneration
       ? [
           {
@@ -222,9 +253,9 @@ export function buildThreadActionMenuItems(
       icon: "copy",
       separatorBefore: true,
       children: [
-        { id: "copy-path", label: "Path", icon: "folder" },
+        { id: "copy-path", label: "Working directory", icon: "folder" },
         ...(state.branch
-          ? [{ id: "copy-branch" as const, label: "Branch", icon: "git-branch" }]
+          ? [{ id: "copy-branch" as const, label: "Branch name", icon: "git-branch" }]
           : []),
         { id: "copy-thread-id", label: "Thread ID", icon: "hash" },
       ],

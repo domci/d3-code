@@ -140,7 +140,6 @@ import {
   latestUnheldRun,
   usageLimitRunPresentedAsLatest,
 } from "@t3tools/shared/orchestrationV2ThreadError";
-import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
 import { truncate } from "@t3tools/shared/String";
@@ -567,6 +566,7 @@ import { fileAttachmentCapabilityBlockReason } from "./chat/composerAttachmentFi
 import { assetEnvironment } from "../state/assets";
 import { readEnvironmentScope, readPreparedConnection } from "../state/session";
 import { useAtomCommand } from "../state/use-atom-command";
+import { useForkThread } from "../hooks/useForkThread";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { Button, InlineButton } from "./ui/button";
@@ -1650,15 +1650,6 @@ export default function ChatView(props: ChatViewProps) {
     reportFailure: false,
   });
   const revertThreadCheckpoint = useOrchestrationCommand(threadEnvironment.revertCheckpoint, {
-    reportFailure: false,
-  });
-  const forkThreadFromRun = useAtomCommand(threadEnvironment.forkFromRun, {
-    reportFailure: false,
-  });
-  const createGitWorktree = useAtomCommand(vcsEnvironment.createWorktree, {
-    reportFailure: false,
-  });
-  const removeGitWorktree = useAtomCommand(vcsEnvironment.removeWorktree, {
     reportFailure: false,
   });
   const openPreview = useAtomCommand(previewEnvironment.open, { reportFailure: false });
@@ -8568,6 +8559,7 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
 
+  const forkThread = useForkThread();
   const onForkFromRun = useCallback(
     async (input: {
       readonly sourceThreadId: ThreadId;
@@ -8575,101 +8567,24 @@ export default function ChatView(props: ChatViewProps) {
       readonly newWorktree?: { readonly baseBranch: string };
     }) => {
       if (!activeThread || activeEnvironmentUnavailable) return;
-      const targetThreadId = newThreadId();
-      const targetThreadRef = scopeThreadRef(environmentId, targetThreadId);
-      const result = await forkThreadFromRun({
+      await forkThread({
         environmentId,
-        input: {
-          sourceThreadId: input.sourceThreadId,
-          targetThreadId,
-          runId: input.runId,
-          title: `${activeThread.title} fork`,
-        },
-      });
-      if (result._tag === "Failure") {
-        if (!isAtomCommandInterrupted(result)) {
-          const error = squashAtomCommandFailure(result);
-          setThreadError(
-            activeThread.id,
-            error instanceof Error ? error.message : "Failed to fork this response.",
-          );
-        }
-        return;
-      }
-      const targetThreadReady = await waitForThreadShell(targetThreadRef);
-      if (!targetThreadReady) {
-        setThreadError(
-          activeThread.id,
-          "The fork was created, but its thread data did not reach this client. Reconnect and try opening it from the sidebar.",
-        );
-        return;
-      }
-      if (input.newWorktree) {
-        // The fork exists on the source's worktree already, so a failure below still opens it.
-        const projectCwd = activeProject?.workspaceRoot;
-        const reasonOf = (failed: { readonly cause: Cause.Cause<unknown> }) => {
-          const error = squashAtomCommandFailure(failed);
-          return error instanceof Error ? error.message : "unknown error";
-        };
-        let setupFailure: string | null = null;
-        if (!projectCwd) {
-          setupFailure = "the project is unavailable";
-        } else {
-          // ponytail: a forked worktree skips the project's runOnWorktreeCreate setup script; move provisioning server-side (ThreadLaunchService) if that is needed.
-          const created = await createGitWorktree({
-            environmentId,
-            input: {
-              cwd: projectCwd,
-              refName: input.newWorktree.baseBranch,
-              newRefName: buildTemporaryWorktreeBranchName(randomUUID),
-              baseRefName: input.newWorktree.baseBranch,
-              path: null,
-            },
-          });
-          if (created._tag === "Failure") {
-            setupFailure = reasonOf(created);
-          } else {
-            const { path, refName } = created.value.worktree;
-            const pointed = await updateThreadMetadata({
-              environmentId,
-              input: { threadId: targetThreadId, branch: refName, worktreePath: path },
-            });
-            if (pointed._tag === "Failure") {
-              setupFailure = reasonOf(pointed);
-              void removeGitWorktree({
-                environmentId,
-                input: { cwd: projectCwd, path, force: true },
-              });
-            }
-          }
-        }
-        if (setupFailure !== null) {
-          // A toast, not the source thread's error banner: the fork is opened right below.
-          toastManager.add(
-            stackedThreadToast({
-              type: "error",
-              title: "Fork is using the original worktree",
-              description: `Its new worktree could not be set up: ${setupFailure}`,
-            }),
-          );
-        }
-      }
-      await navigate({
-        to: "/$environmentId/$threadId",
-        params: buildThreadRouteParams(targetThreadRef),
+        sourceThreadId: input.sourceThreadId,
+        runId: input.runId,
+        title: `${activeThread.title} fork`,
+        ...(input.newWorktree ? { newWorktree: input.newWorktree } : {}),
+        projectCwd: activeProject?.workspaceRoot,
+        reportError: (message) =>
+          setThreadError(activeThread.id, message ?? "Failed to fork this response."),
       });
     },
     [
       activeEnvironmentUnavailable,
       activeProject,
       activeThread,
-      createGitWorktree,
       environmentId,
-      forkThreadFromRun,
-      navigate,
-      removeGitWorktree,
+      forkThread,
       setThreadError,
-      updateThreadMetadata,
     ],
   );
   const gitStatusRefName = gitStatusQuery.data?.refName ?? null;

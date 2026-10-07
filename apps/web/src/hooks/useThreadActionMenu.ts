@@ -9,6 +9,7 @@ import {
 import { canSnooze, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import {
   AuthOrchestrationOperateScope,
+  AuthSourceControlWriteScope,
   type ScopedThreadRef,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -46,6 +47,7 @@ import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
 import { useCopyToClipboard } from "./useCopyToClipboard";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { useClientSettings } from "./useSettings";
+import { readProjectGitBranch, useForkThread } from "./useForkThread";
 import { useThreadActions } from "./useThreadActions";
 
 function failureToast(title: string, error: unknown) {
@@ -106,6 +108,7 @@ export function useThreadActionMenu(input: {
     reportFailure: false,
   });
   const handleNewThread = useNewThreadHandler();
+  const forkThread = useForkThread();
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
@@ -139,6 +142,20 @@ export function useThreadActionMenu(input: {
         // what the user is looking at.
         const thread = readThreadShell(threadRef);
         if (!thread) return;
+        const project = projects.find(
+          (candidate) =>
+            candidate.environmentId === thread.environmentId && candidate.id === thread.projectId,
+        );
+        // Latest stable fork needs a finished run and no run in flight; the
+        // server still has the last word (it wants a completed, checkpointed run).
+        const canFork = thread.latestRun !== null && threadRuntimeCanArchive(thread.runtime);
+        const projectGit =
+          project && readEnvironmentScope(threadRef.environmentId, AuthSourceControlWriteScope)
+            ? await readProjectGitBranch(threadRef.environmentId, project.workspaceRoot)
+            : null;
+        const worktreeBaseBranch = projectGit?.isRepo
+          ? (thread.branch ?? projectGit.refName)
+          : null;
         const now = new Date();
         const supports = {
           settlement: readEnvironmentSupportsSettlement(threadRef.environmentId),
@@ -162,6 +179,7 @@ export function useThreadActionMenu(input: {
           isRunning: !threadRuntimeCanArchive(thread.runtime),
           supports,
           snoozePresets,
+          fork: { canFork, worktreeBaseBranch },
         });
         const clicked = await settlePromise(() => api.contextMenu.show(items, position));
         if (clicked._tag === "Failure" || clicked.value === null) return;
@@ -199,11 +217,6 @@ export function useThreadActionMenu(input: {
         };
         switch (action) {
           case "project-settings": {
-            const project = projects.find(
-              (candidate) =>
-                candidate.environmentId === thread.environmentId &&
-                candidate.id === thread.projectId,
-            );
             if (!project) return;
             const projectKey =
               logicalProjectKeyByPhysicalKey.get(derivePhysicalProjectKey(project)) ??
@@ -255,6 +268,23 @@ export function useThreadActionMenu(input: {
             return;
           case "rename":
             onStartRename();
+            return;
+          case "fork-here":
+          case "fork-in-worktree":
+            await forkThread({
+              environmentId: threadRef.environmentId,
+              sourceThreadId: threadRef.threadId,
+              title: `${thread.title} fork`,
+              projectCwd: project?.workspaceRoot,
+              ...(action === "fork-in-worktree" && worktreeBaseBranch
+                ? { newWorktree: { baseBranch: worktreeBaseBranch } }
+                : {}),
+              reportError: (message) =>
+                failureToast(
+                  "Failed to fork thread",
+                  new Error(message ?? "Could not fork this thread."),
+                ),
+            });
             return;
           case "regenerate-title":
             if (isRegeneratingTitle) return;
@@ -352,6 +382,7 @@ export function useThreadActionMenu(input: {
       copyPathToClipboard,
       copyThreadIdToClipboard,
       deleteThread,
+      forkThread,
       handleNewThread,
       logicalProjectKeyByPhysicalKey,
       markThreadUnread,
