@@ -168,7 +168,7 @@ export default function ProjectScriptsControl({
 
   const importMenuItems = importableScripts.length > 0 && (
     <>
-      {primaryScript && <MenuSeparator />}
+      {scripts.length > 0 && <MenuSeparator />}
       <MenuGroup>
         <MenuGroupLabel>From t3.json</MenuGroupLabel>
         {importableScripts.map((fileScript) => (
@@ -266,7 +266,7 @@ export default function ProjectScriptsControl({
               </MenuShortcut>
             </MenuItem>
           )}
-          {primaryScript || importableScripts.length > 0 ? (
+          {scripts.length > 0 || importableScripts.length > 0 ? (
             <MenuSub
               open={actionsMenuOpen.scripts}
               onOpenChange={(open) =>
@@ -369,7 +369,9 @@ export default function ProjectScriptsControl({
             </MenuPopup>
           </Menu>
         </ActionGroup>
-      ) : importableScripts.length > 0 ? (
+      ) : scripts.length > 0 || importableScripts.length > 0 ? (
+        // No one-click action (only a settle action, or only t3.json imports),
+        // so the saved actions stay reachable through this menu.
         isPanel ? (
           <div
             role="group"
@@ -408,11 +410,7 @@ export default function ProjectScriptsControl({
                 <ChevronDownIcon className={THREAD_DETAILS_PANEL_CHEVRON_CLASS} />
               </MenuTrigger>
               <MenuPopup align="end" anchor={panelAnchorRef} className="w-(--anchor-width)">
-                {importMenuItems}
-                <MenuItem onClick={openAddDialog}>
-                  <PlusIcon className="size-4" />
-                  Add action
-                </MenuItem>
+                {scriptItems}
               </MenuPopup>
             </Menu>
           </div>
@@ -433,13 +431,7 @@ export default function ProjectScriptsControl({
               </span>
               <ChevronDownIcon className="size-3.5" />
             </MenuTrigger>
-            <MenuPopup align="end">
-              {importMenuItems}
-              <MenuItem onClick={openAddDialog}>
-                <PlusIcon className="size-4" />
-                Add action
-              </MenuItem>
-            </MenuPopup>
+            <MenuPopup align="end">{scriptItems}</MenuPopup>
           </Menu>
         )
       ) : (

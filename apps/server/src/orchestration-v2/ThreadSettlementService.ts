@@ -528,19 +528,18 @@ export const make = Effect.gen(function* () {
       const settled = yield* projections.getThread(threadId);
       if (settled.settledOverride !== "settled") return;
       yield* terminals.closeIdle({ threadId });
-      // Closing waits on a process check. A thread re-engaged meanwhile is
-      // working again, so its worktree is no place for cleanup.
+      const worktreePath = settled.worktreePath;
+      if (worktreePath === null || !(yield* fileSystem.exists(worktreePath))) return;
+      // Closing and the worktree check wait on I/O. A thread re-engaged
+      // meanwhile is working again, so its worktree is no place for cleanup.
       const thread = yield* projections.getThread(threadId);
       if (thread.settledOverride !== "settled") return;
       const settledAtMs = toMillis(thread.settledAt);
       if (settledAtMs === null || settleActionRunAt.get(threadId) === settledAtMs) return;
-      if (thread.worktreePath === null || !(yield* fileSystem.exists(thread.worktreePath))) {
-        return;
-      }
       const run = yield* projectScripts.runForThread({
         threadId,
         projectId: thread.projectId,
-        worktreePath: thread.worktreePath,
+        worktreePath,
         trigger: "settle",
         // A clean exit closes the script's shell so it does not hold the worktree.
         observeCompletion: {},
