@@ -215,6 +215,9 @@ import {
   ProjectWriteFileError,
   ProjectWriteFileInput,
   ProjectWriteFileResult,
+  ThreadRunWorktreeSetupError,
+  ThreadRunWorktreeSetupInput,
+  ThreadRunWorktreeSetupResult,
 } from "./project.ts";
 import {
   TerminalAttachInput,
@@ -375,6 +378,7 @@ export const WS_METHODS = {
 
   // Provider methods
   providerUploadFeedback: "provider.uploadFeedback",
+  threadRunWorktreeSetup: "thread.runWorktreeSetup",
   providerAuthStart: "provider.auth.start",
   providerConsumeResetCredit: "provider.consumeResetCredit",
   providerAuthComplete: "provider.auth.complete",
@@ -1255,6 +1259,12 @@ const WsAttachmentsDeleteRpc = Rpc.make(WS_METHODS.attachmentsDelete, {
   error: EnvironmentAuthorizationError,
 });
 
+const WsThreadRunWorktreeSetupRpc = Rpc.make(WS_METHODS.threadRunWorktreeSetup, {
+  payload: ThreadRunWorktreeSetupInput,
+  success: ThreadRunWorktreeSetupResult,
+  error: Schema.Union([ThreadRunWorktreeSetupError, EnvironmentAuthorizationError]),
+});
+
 const WsProviderUploadFeedbackRpc = Rpc.make(WS_METHODS.providerUploadFeedback, {
   payload: ProviderUploadFeedbackInput,
   success: ProviderUploadFeedbackResult,
@@ -1882,6 +1892,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsAttachmentsCreateUploadUrlRpc,
   WsAttachmentsDeleteRpc,
   WsProviderUploadFeedbackRpc,
+  WsThreadRunWorktreeSetupRpc,
   WsSubscribeVcsStatusRpc,
   WsSubscribeWorktreeSetupRpc,
   WsWorktreeSetupCancelRpc,

@@ -18,6 +18,9 @@ import {
   type RuntimeMode,
   type ScheduledTaskId,
   ThreadId,
+  ThreadRunWorktreeSetupError,
+  type ThreadRunWorktreeSetupInput,
+  type ThreadRunWorktreeSetupResult,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -157,6 +160,14 @@ export class ThreadLaunchService extends Context.Service<
     readonly retryPreparation: (
       input: ThreadLaunchRetryInput,
     ) => Effect.Effect<Orchestrator.OrchestratorV2DispatchResult, Orchestrator.OrchestratorV2Error>;
+    /**
+     * Starts the project's worktree setup script in the thread's existing
+     * worktree (forks provision their worktree client-side). Returns once the
+     * script is started in its terminal; it does not wait for it to finish.
+     */
+    readonly runWorktreeSetup: (
+      input: ThreadRunWorktreeSetupInput,
+    ) => Effect.Effect<ThreadRunWorktreeSetupResult, ThreadRunWorktreeSetupError>;
   }
 >()("t3/orchestration-v2/ThreadLaunchService") {}
 
@@ -977,7 +988,43 @@ const make = Effect.gen(function* () {
     );
   };
 
-  return ThreadLaunchService.of({ launch, retryPreparation });
+  const runWorktreeSetup: ThreadLaunchService["Service"]["runWorktreeSetup"] = Effect.fn(
+    "ThreadLaunchService.runWorktreeSetup",
+  )(function* (input) {
+    const fail = (message: string, cause?: unknown) =>
+      new ThreadRunWorktreeSetupError({
+        threadId: input.threadId,
+        message,
+        ...(cause === undefined ? {} : { cause }),
+      });
+    const projection = yield* threads
+      .getThreadRecords(input.threadId, [])
+      .pipe(Effect.mapError((cause) => fail("Could not read the thread.", cause)));
+    const worktreePath = projection.thread.worktreePath;
+    if (worktreePath === null || projection.thread.deletedAt !== null) {
+      return yield* fail("The thread has no worktree.");
+    }
+    const project = yield* projects
+      .getById(projection.thread.projectId)
+      .pipe(Effect.mapError((cause) => fail("Could not read the project.", cause)));
+    if (Option.isNone(project)) return yield* fail("The project no longer exists.");
+    const setup = yield* setupScripts
+      .runForThread({
+        threadId: input.threadId,
+        projectId: project.value.id,
+        projectCwd: project.value.workspaceRoot,
+        worktreePath,
+        project: {
+          id: project.value.id,
+          workspaceRoot: project.value.workspaceRoot,
+          scripts: project.value.scripts,
+        },
+      })
+      .pipe(Effect.mapError((cause) => fail("The setup script could not be started.", cause)));
+    return { status: setup.status === "started" ? "started" : "no-script" } as const;
+  });
+
+  return ThreadLaunchService.of({ launch, retryPreparation, runWorktreeSetup });
 });
 
 export const layer = Layer.effect(ThreadLaunchService, make);

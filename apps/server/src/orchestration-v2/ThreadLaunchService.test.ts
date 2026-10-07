@@ -1104,6 +1104,63 @@ it.effect("runs a Scratch thread launched at the root in its own folder", () =>
   }),
 );
 
+it.effect("runs the project's setup script in an existing thread's worktree on request", () =>
+  Effect.gen(function* () {
+    const harness = makeHarness({
+      runSetup: () =>
+        Effect.succeed({
+          status: "started" as const,
+          scriptId: "setup",
+          cwd: "/repo-worktrees/fork",
+          async: true,
+          scriptName: "Setup",
+          scriptCommand: "bun install",
+          terminalId: "setup-setup",
+        }),
+    });
+    yield* Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const launched = yield* launches.launch(
+        launchInput({
+          command: "command:launch:run-setup",
+          thread: "thread:launch:run-setup",
+          message: "Build the feature",
+          workspace: {
+            type: "existing_worktree",
+            worktreePath: "/repo-worktrees/fork",
+            branch: "fork-branch",
+          },
+        }),
+      );
+      yield* waitUntil(() =>
+        threads
+          .getThreadProjection(launched.threadId)
+          .pipe(Effect.map((projection) => projection.runs[0]?.status === "starting")),
+      );
+      const before = harness.runSetup.mock.calls.length;
+      const result = yield* launches.runWorktreeSetup({ threadId: launched.threadId });
+      assert.equal(result.status, "started");
+      assert.equal(harness.runSetup.mock.calls.length, before + 1);
+      const call = harness.runSetup.mock.calls[before]?.[0];
+      assert.equal(call?.threadId, launched.threadId);
+      assert.equal(call?.worktreePath, "/repo-worktrees/fork");
+
+      const plain = yield* launches.launch(
+        launchInput({
+          command: "command:launch:run-setup-plain",
+          thread: "thread:launch:run-setup-plain",
+          message: "No worktree",
+        }),
+      );
+      const failed = yield* launches
+        .runWorktreeSetup({ threadId: plain.threadId })
+        .pipe(Effect.flip);
+      assert.equal(failed._tag, "ThreadRunWorktreeSetupError");
+    }).pipe(Effect.provide(harness.layer));
+  }),
+);
+
 it.effect("names the worktree itself when the client provides no branch", () =>
   Effect.gen(function* () {
     const harness = makeHarness();
@@ -2025,6 +2082,7 @@ it.effect("shared intake preserves durable attachment bytes after a lost launch 
             ),
           ),
         retryPreparation: launches.retryPreparation,
+        runWorktreeSetup: launches.runWorktreeSetup,
       }),
       Effect.flip,
     );

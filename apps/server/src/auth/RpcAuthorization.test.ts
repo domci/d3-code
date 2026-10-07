@@ -1,5 +1,6 @@
 import {
   AuthEnvironmentMaintainScope,
+  clientRpcRequiredScopes,
   AuthDiagnosticsReadScope,
   AuthFilesystemReadScope,
   AuthProvidersManageScope,
@@ -71,6 +72,15 @@ describe("RPC authorization scopes", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.providerUploadFeedback)).toBe(
       AuthOrchestrationOperateScope,
     );
+  });
+
+  it("requires permission to operate on a thread before running its worktree setup script", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.threadRunWorktreeSetup)).toBe(
+      AuthOrchestrationOperateScope,
+    );
+    expect(clientRpcRequiredScopes(WS_METHODS.threadRunWorktreeSetup, {})).toEqual([
+      AuthOrchestrationOperateScope,
+    ]);
   });
 
   it("requires write access to import agent session history", () => {

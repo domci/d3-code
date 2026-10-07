@@ -2277,6 +2277,7 @@ const layerWsRpc = (
                   }),
             ),
           ),
+        [WS_METHODS.threadRunWorktreeSetup]: (input) => threadLaunch.runWorktreeSetup(input),
         [WS_METHODS.serverUpdateProvider]: (input) =>
           providerMaintenanceRunner.updateProvider(input),
         [WS_METHODS.providerConsumeResetCredit]: (input) =>

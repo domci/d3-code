@@ -49,6 +49,9 @@ export function useForkThread() {
   const removeGitWorktree = useAtomCommand(vcsEnvironment.removeWorktree, {
     reportFailure: false,
   });
+  const runWorktreeSetup = useAtomCommand(threadEnvironment.runWorktreeSetup, {
+    reportFailure: false,
+  });
   const updateThreadMetadata = useOrchestrationCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
@@ -92,7 +95,6 @@ export function useForkThread() {
         if (!projectCwd) {
           setupFailure = "the project is unavailable";
         } else {
-          // ponytail: a forked worktree skips the project's runOnWorktreeCreate setup script; move provisioning server-side (ThreadLaunchService) if that is needed.
           const created = await createGitWorktree({
             environmentId,
             input: {
@@ -117,6 +119,21 @@ export function useForkThread() {
                 environmentId,
                 input: { cwd: projectCwd, path, force: true },
               });
+            } else {
+              // The fork keeps its new worktree if the script fails; only say so.
+              const setup = await runWorktreeSetup({
+                environmentId,
+                input: { threadId: targetThreadId },
+              });
+              if (setup._tag === "Failure" && !isAtomCommandInterrupted(setup)) {
+                toastManager.add(
+                  stackedThreadToast({
+                    type: "error",
+                    title: "Worktree setup script did not start",
+                    description: reasonOf(setup),
+                  }),
+                );
+              }
             }
           }
         }
@@ -136,7 +153,14 @@ export function useForkThread() {
         params: buildThreadRouteParams(targetThreadRef),
       });
     },
-    [createGitWorktree, forkThread, navigate, removeGitWorktree, updateThreadMetadata],
+    [
+      createGitWorktree,
+      forkThread,
+      navigate,
+      removeGitWorktree,
+      runWorktreeSetup,
+      updateThreadMetadata,
+    ],
   );
 }
 

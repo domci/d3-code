@@ -144,6 +144,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.attachmentsCreateUploadUrl]: "workspace",
   [WS_METHODS.attachmentsDelete]: "workspace",
   [WS_METHODS.providerUploadFeedback]: "provider",
+  [WS_METHODS.threadRunWorktreeSetup]: "vcs",
   [WS_METHODS.subscribeVcsStatus]: "vcs",
   [WS_METHODS.subscribeWorktreeSetup]: "vcs",
   [WS_METHODS.worktreeSetupCancel]: "vcs",
