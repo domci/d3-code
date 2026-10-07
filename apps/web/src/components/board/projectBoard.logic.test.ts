@@ -5,8 +5,10 @@ import {
   NO_BOARD_FILTERS,
   collectBoardFacets,
   filterBoardItems,
-  groupBoardColumns,
-  moveBoardItem,
+  dedupeBoardRepositories,
+  mergeBoardColumns,
+  repositoryAccent,
+  resolveDropTarget,
   startThreadPrompt,
 } from "./projectBoard.logic";
 
@@ -43,25 +45,97 @@ const items = [
   item({ itemId: "d", statusOptionId: "deleted-option", state: null, kind: "draft", url: null }),
 ];
 
-describe("groupBoardColumns", () => {
+const board = { columns, statusFieldId: "field" };
+
+describe("mergeBoardColumns", () => {
   it("orders columns as GitHub does and ends with No status, which also holds orphaned options", () => {
-    const grouped = groupBoardColumns({ columns, statusFieldId: "field" }, items);
-    expect(grouped.map((column) => [column.name, column.optionId])).toEqual([
-      ["Todo", "todo"],
-      ["Done", "done"],
-      ["No status", null],
-    ]);
-    expect(grouped.map((column) => column.items.map((entry) => entry.itemId))).toEqual([
+    const merged = mergeBoardColumns([{ repoKey: "r", board, items }]);
+    expect(merged.map((column) => column.name)).toEqual(["Todo", "Done", "No status"]);
+    expect(merged.map((column) => column.items.map((entry) => entry.itemId))).toEqual([
       ["b"],
       ["a"],
       ["c", "d"],
     ]);
   });
 
-  it("shows one column of everything when the project has no Status field", () => {
-    const grouped = groupBoardColumns({ columns: [], statusFieldId: null }, items);
-    expect(grouped).toHaveLength(1);
-    expect(grouped[0]?.items).toHaveLength(4);
+  it("merges boards by status name, case-insensitively, in first-seen order", () => {
+    const other = {
+      statusFieldId: "f2",
+      columns: [
+        { optionId: "x1", name: " done ", color: null },
+        { optionId: "x2", name: "Review", color: null },
+      ],
+    };
+    const merged = mergeBoardColumns([
+      { repoKey: "r", board, items: [items[0]!] },
+      { repoKey: "o", board: other, items: [item({ itemId: "z", statusOptionId: "x1" })] },
+    ]);
+    expect(merged.map((column) => column.name)).toEqual(["Todo", "Done", "Review", "No status"]);
+    expect(merged[1]?.items.map((entry) => [entry.itemId, entry.repoKey])).toEqual([
+      ["a", "r"],
+      ["z", "o"],
+    ]);
+  });
+
+  it("puts everything of a project without a Status field under No status", () => {
+    const merged = mergeBoardColumns([
+      { repoKey: "r", board: { columns: [], statusFieldId: null }, items },
+    ]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.items).toHaveLength(4);
+  });
+});
+
+describe("resolveDropTarget", () => {
+  const done = mergeBoardColumns([{ repoKey: "r", board, items: [] }])[1]!.key;
+  it("finds the option of the card's own project by name, or clears for No status", () => {
+    expect(resolveDropTarget(board, done)).toEqual({ fieldId: "field", optionId: "done" });
+    expect(resolveDropTarget(board, "none")).toEqual({ fieldId: "field", optionId: null });
+  });
+  it("refuses a column the project has no option for, or a project without Status", () => {
+    expect(resolveDropTarget(board, "status:review")).toBeNull();
+    expect(resolveDropTarget({ columns: [], statusFieldId: null }, done)).toBeNull();
+  });
+});
+
+describe("dedupeBoardRepositories", () => {
+  const project = (id: string, root: string, key: string, provider = "github") => ({
+    id,
+    workspaceRoot: root,
+    repositoryIdentity: { provider, canonicalKey: key, owner: "Acme", name: "Web" },
+  });
+  it("keeps one project per repository, preferring a non-temporary checkout", () => {
+    const repos = dedupeBoardRepositories([
+      project("a", "/home/u/.t3/worktrees/web", "github.com/acme/web"),
+      project("b", "/home/u/code/web", "GitHub.com/Acme/Web"),
+      project("c", "/home/u/code/web2", "github.com/acme/web"),
+      project("d", "/home/u/code/lab", "gitlab.com/acme/lab", "gitlab"),
+    ]);
+    expect(repos.map((repo) => [repo.label, repo.project.id])).toEqual([["Acme/Web", "b"]]);
+  });
+  it("prefers a real checkout over agent checkouts", () => {
+    const repos = dedupeBoardRepositories([
+      project(
+        "a",
+        "/srv/dc-team/state/checkouts/t_6ffc96f9/723ad96f7ece1cde68b9686eefd399a207f185236253abc6ba74c0cccbbea2e2",
+        "github.com/frub-ai/frub-ai",
+      ),
+      project("b", "/home/dom/repos/frub-ai", "github.com/frub-ai/frub-ai"),
+    ]);
+    expect(repos[0]?.project.workspaceRoot).toBe("/home/dom/repos/frub-ai");
+  });
+  it("keeps the first of equals", () => {
+    const repos = dedupeBoardRepositories([
+      project("a", "/code/a", "github.com/acme/web"),
+      project("b", "/code/b", "github.com/acme/web"),
+    ]);
+    expect(repos[0]?.project.id).toBe("a");
+  });
+});
+
+describe("repositoryAccent", () => {
+  it("is stable and case-insensitive", () => {
+    expect(repositoryAccent("Acme/Web")).toBe(repositoryAccent("acme/web"));
   });
 });
 
@@ -80,19 +154,6 @@ describe("filterBoardItems", () => {
 
   it("lists the labels and assignees present on the board", () => {
     expect(collectBoardFacets(items)).toEqual({ labels: ["bug", "docs"], assignees: ["octocat"] });
-  });
-});
-
-describe("moveBoardItem", () => {
-  it("changes only the moved card's Status", () => {
-    const moved = moveBoardItem(items, "b", "done");
-    expect(moved.map((entry) => entry.statusOptionId)).toEqual([
-      "done",
-      "done",
-      null,
-      "deleted-option",
-    ]);
-    expect(moveBoardItem(items, "a", null)[0]?.statusOptionId).toBeNull();
   });
 });
 

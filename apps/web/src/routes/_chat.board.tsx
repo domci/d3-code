@@ -1,5 +1,5 @@
 import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 
 import { ProjectBoardPage, type ProjectBoardSearch } from "../components/board/ProjectBoardPage";
 
@@ -16,17 +16,5 @@ export const Route = createFileRoute("/_chat/board")({
 });
 
 function BoardRouteView() {
-  const search = Route.useSearch();
-  const navigate = useNavigate({ from: Route.fullPath });
-  return (
-    <ProjectBoardPage
-      search={search}
-      onSelectProject={(project) =>
-        void navigate({
-          search: { environmentId: project.environmentId, projectId: project.id },
-          replace: true,
-        })
-      }
-    />
-  );
+  return <ProjectBoardPage search={Route.useSearch()} />;
 }

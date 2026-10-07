@@ -1,4 +1,4 @@
-import { useAtomValue } from "@effect/atom-react";
+import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
 import {
@@ -6,19 +6,20 @@ import {
   ProjectBoardError,
   type EnvironmentId,
   type ProjectBoard,
-  type ProjectBoardItem,
   type ProjectId,
 } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
+import * as Option from "effect/Option";
+import { AsyncResult, Atom } from "effect/reactivity";
 import * as Schema from "effect/Schema";
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useContext, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { isElectron } from "../../env";
 import { useOpenDraftWithPrompt } from "../../hooks/useOpenDraftWithPrompt";
 import { cn } from "../../lib/utils";
 import { readLocalApi } from "../../localApi";
 import { useAllEnvironmentShellsBootstrapped, useProjects } from "../../state/entities";
-import { useEnvironments } from "../../state/environments";
-import { formatEnvironmentQueryError, useEnvironmentQuery } from "../../state/query";
+import { formatEnvironmentQueryError } from "../../state/query";
 import { sourceControlEnvironment } from "../../state/sourceControl";
 import { useAtomCommand } from "../../state/use-atom-command";
 import {
@@ -31,21 +32,26 @@ import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { RefreshIcon } from "../ui/refresh-icon";
 import { SidebarInset } from "../ui/sidebar";
+import { Menu, MenuCheckboxItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Spinner } from "../ui/spinner";
 import { toastManager } from "../ui/toast";
+import { ProjectFavicon } from "../ProjectFavicon";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../WorkspaceBreadcrumb";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import {
+  BOARD_REPOSITORIES_KEY,
   NO_BOARD_FILTERS,
   collectBoardFacets,
+  dedupeBoardRepositories,
   filterBoardItems,
-  githubBoardProjects,
-  groupBoardColumns,
-  moveBoardItem,
-  projectBoardChoiceKey,
+  mergeBoardColumns,
+  repositoryAccent,
+  resolveDropTarget,
   startThreadPrompt,
+  type BoardCardItem,
   type BoardColumnView,
   type BoardFilters,
+  type BoardRepository,
   type BoardStateFilter,
 } from "./projectBoard.logic";
 
@@ -55,7 +61,6 @@ export interface ProjectBoardSearch {
 }
 
 const BOARD_DRAG_TYPE = "application/x-t3-board-item";
-const NO_MOVES: ReadonlyMap<string, string | null> = new Map();
 
 const isProjectBoardError = Schema.is(ProjectBoardError);
 
@@ -71,137 +76,184 @@ const COLUMN_DOT_CLASS: Record<string, string> = {
   PURPLE: "bg-primary",
 };
 
-function readRememberedProjectNumber(key: string): number | undefined {
+function readRememberedRepositories(): ReadonlyArray<string> | null {
   try {
-    const value = Number(window.localStorage.getItem(key));
-    return Number.isInteger(value) && value > 0 ? value : undefined;
+    const value: unknown = JSON.parse(
+      window.localStorage.getItem(BOARD_REPOSITORIES_KEY) ?? "null",
+    );
+    return Array.isArray(value) ? value.filter((key) => typeof key === "string") : null;
   } catch {
-    return undefined;
+    return null;
   }
 }
 
-function rememberProjectNumber(key: string, projectNumber: number): void {
+function rememberRepositories(keys: ReadonlyArray<string>): void {
   try {
-    window.localStorage.setItem(key, String(projectNumber));
+    window.localStorage.setItem(BOARD_REPOSITORIES_KEY, JSON.stringify(keys));
   } catch {
     // Storage can be blocked; the choice then lasts until the page reloads.
   }
 }
 
-export function ProjectBoardPage(props: {
-  readonly search: ProjectBoardSearch;
-  readonly onSelectProject: (project: {
-    readonly environmentId: EnvironmentId;
-    readonly id: ProjectId;
-  }) => void;
-}) {
-  const { search, onSelectProject } = props;
+type ProjectRecord = ReturnType<typeof useProjects>[number];
+type Repository = BoardRepository<ProjectRecord>;
+
+export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch }) {
+  const { search } = props;
   const allProjects = useProjects();
   const projectsKnown = useAllEnvironmentShellsBootstrapped();
-  const { environments } = useEnvironments();
-  const candidates = useMemo(() => githubBoardProjects(allProjects), [allProjects]);
-  const project = useMemo(
+  const registry = useContext(RegistryContext);
+  const repos = useMemo(() => dedupeBoardRepositories(allProjects), [allProjects]);
+
+  // One read per repository, in parallel, shown together as they settle.
+  const boardAtoms = useMemo(
     () =>
-      candidates.find(
-        (candidate) =>
-          candidate.id === search.projectId &&
-          (search.environmentId === undefined || candidate.environmentId === search.environmentId),
-      ) ??
-      candidates[0] ??
-      null,
-    [candidates, search.environmentId, search.projectId],
-  );
-
-  // The GitHub Project chosen for each T3 project, remembered across visits.
-  const choiceKey =
-    project === null ? null : projectBoardChoiceKey(project.environmentId, project.id);
-  const [chosen, setChosen] = useState<Readonly<Record<string, number>>>({});
-  const remembered = useMemo(
-    () => (choiceKey === null ? undefined : readRememberedProjectNumber(choiceKey)),
-    [choiceKey],
-  );
-  const projectNumber = choiceKey === null ? undefined : (chosen[choiceKey] ?? remembered);
-
-  const query = useEnvironmentQuery(
-    project === null
-      ? null
-      : sourceControlEnvironment.projectBoard({
-          environmentId: project.environmentId,
-          input: {
-            cwd: project.workspaceRoot,
-            ...(projectNumber === undefined ? {} : { projectNumber }),
-          },
+      repos.map((repo) =>
+        sourceControlEnvironment.projectBoard({
+          environmentId: repo.project.environmentId,
+          input: { cwd: repo.project.workspaceRoot },
         }),
+      ),
+    [repos],
   );
-  const board = query.data?.board ?? null;
-  const githubProjects = query.data?.projects ?? [];
+  const resultsAtom = useMemo(
+    () => Atom.make((get) => boardAtoms.map((atom) => get(atom))),
+    [boardAtoms],
+  );
+  const results = useAtomValue(resultsAtom);
+  const states = useMemo(
+    () =>
+      results.map((result, index) => {
+        const failure =
+          result._tag === "Failure" ? Option.getOrNull(Cause.findErrorOption(result.cause)) : null;
+        return {
+          repo: repos[index] as Repository,
+          board: Option.getOrNull(AsyncResult.value(result))?.board ?? null,
+          error: result._tag === "Failure" ? formatEnvironmentQueryError(result.cause) : null,
+          scopeMissing: isProjectBoardError(failure) && failure.reason === "scope_missing",
+          settled: result._tag !== "Initial",
+        };
+      }),
+    [repos, results],
+  );
+  const loaded = states.filter((state) => state.board !== null);
+  const failures = states.filter((state) => state.error !== null);
+  const pending = results.some((result) => result.waiting);
+  const refreshRepo = (key: string) => {
+    const atom = boardAtoms[repos.findIndex((repo) => repo.key === key)];
+    if (atom !== undefined) registry.refresh(atom);
+  };
+
+  // The repositories shown: the route's project, else the remembered choice, else all.
+  const searchKey = allProjects
+    .find(
+      (project) =>
+        project.id === search.projectId &&
+        (search.environmentId === undefined || project.environmentId === search.environmentId),
+    )
+    ?.repositoryIdentity?.canonicalKey.toLowerCase();
+  const [picked, setPicked] = useState<ReadonlyArray<string> | null>(null);
+  const [remembered] = useState(readRememberedRepositories);
+  const boardRepos = loaded.map((state) => state.repo);
+  const wanted = picked ?? (searchKey === undefined ? remembered : [searchKey]);
+  const chosen = new Set(wanted);
+  const activeKeys = boardRepos.some((repo) => chosen.has(repo.key))
+    ? chosen
+    : new Set(boardRepos.map((repo) => repo.key));
+  const pickRepositories = (keys: ReadonlyArray<string>) => {
+    setPicked(keys);
+    rememberRepositories(keys);
+  };
 
   const canMove = useAtomValue(
-    sourceControlEnvironment.moveProjectBoardItem.permissionAtom(project?.environmentId ?? null),
+    useMemo(() => {
+      const permissions = [...new Set(repos.map((repo) => repo.project.environmentId))].map((id) =>
+        sourceControlEnvironment.moveProjectBoardItem.permissionAtom(id),
+      );
+      return Atom.make((get) => permissions.every((permission) => get(permission)));
+    }, [repos]),
   );
   const moveItem = useAtomCommand(sourceControlEnvironment.moveProjectBoardItem, {
     reportFailure: false,
   });
   const openDraftWithPrompt = useOpenDraftWithPrompt();
 
-  // Moves shown before GitHub has confirmed them. They belong to the board they were made on:
-  // once a newer read arrives it is the truth, and they are dropped with the board they annotate.
-  const [moves, setMoves] = useState<{
-    readonly base: ProjectBoard | null;
-    readonly byItem: ReadonlyMap<string, string | null>;
-  }>({ base: null, byItem: NO_MOVES });
-  const pendingMoves = useRef(0);
-  const activeMoves = moves.base === board ? moves.byItem : NO_MOVES;
-  const items = useMemo(
-    () =>
-      board === null
-        ? []
-        : [...activeMoves].reduce(
-            (current, [itemId, optionId]) => moveBoardItem(current, itemId, optionId),
-            board.items,
-          ),
-    [activeMoves, board],
-  );
+  // Moves shown before GitHub has confirmed them. Each belongs to the board it was made on: once
+  // a newer read arrives it is the truth, and the move is dropped with the board it annotates.
+  const [moves, setMoves] = useState<
+    ReadonlyMap<string, { readonly base: ProjectBoard; readonly optionId: string | null }>
+  >(new Map());
+  const pendingMoves = useRef<Record<string, number>>({});
+  const shown = loaded
+    .filter((state) => activeKeys.has(state.repo.key))
+    .map((state) => {
+      const board = state.board as ProjectBoard;
+      return {
+        repoKey: state.repo.key,
+        board,
+        items: board.items.map((item) => {
+          const move = moves.get(item.itemId);
+          return move?.base === board ? { ...item, statusOptionId: move.optionId } : item;
+        }),
+      };
+    });
 
-  const boardKey = board === null || project === null ? "" : `${project.id}:${board.projectId}`;
-  const [filterState, setFilterState] = useState({ key: "", filters: NO_BOARD_FILTERS });
-  const filters = filterState.key === boardKey ? filterState.filters : NO_BOARD_FILTERS;
-  const setFilters = (next: BoardFilters) => setFilterState({ key: boardKey, filters: next });
-  const facets = useMemo(() => collectBoardFacets(board?.items ?? []), [board]);
-  const columns = useMemo(
-    () => (board === null ? [] : groupBoardColumns(board, filterBoardItems(items, filters))),
-    [board, filters, items],
+  const [filterState, setFilterState] = useState(NO_BOARD_FILTERS);
+  const facets = collectBoardFacets(shown.flatMap((entry) => entry.items));
+  const filters: BoardFilters = {
+    ...filterState,
+    label: facets.labels.includes(filterState.label ?? "") ? filterState.label : null,
+    assignee: facets.assignees.includes(filterState.assignee ?? "") ? filterState.assignee : null,
+  };
+  const columns = mergeBoardColumns(
+    shown.map((entry) => ({ ...entry, items: filterBoardItems(entry.items, filters) })),
   );
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [overKey, setOverKey] = useState<string | null>(null);
-  const canDrag = board !== null && board.statusFieldId !== null && canMove;
+  const dragged =
+    draggingId === null
+      ? undefined
+      : columns.flatMap((column) => column.items).find((item) => item.itemId === draggingId);
+  const dropTarget = (card: BoardCardItem | undefined, columnKey: string) => {
+    const board = shown.find((entry) => entry.repoKey === card?.repoKey)?.board;
+    return board === undefined ? null : resolveDropTarget(board, columnKey);
+  };
+  const repoOf = (key: string) => repos.find((repo) => repo.key === key);
 
-  const dropOnColumn = async (itemId: string, optionId: string | null) => {
-    if (project === null || board === null || board.statusFieldId === null) return;
-    const item = items.find((entry) => entry.itemId === itemId);
-    if (item === undefined || item.statusOptionId === optionId) return;
-    setMoves((current) => ({
-      base: board,
-      byItem: new Map(current.base === board ? current.byItem : NO_MOVES).set(itemId, optionId),
-    }));
-    pendingMoves.current += 1;
+  const dropOnColumn = async (itemId: string, columnKey: string) => {
+    const card = columns.flatMap((column) => column.items).find((item) => item.itemId === itemId);
+    const repo = repoOf(card?.repoKey ?? "");
+    const board = shown.find((entry) => entry.repoKey === card?.repoKey)?.board;
+    if (card === undefined || repo === undefined || board === undefined) return;
+    const target = dropTarget(card, columnKey);
+    if (target === null) {
+      toastManager.add({
+        type: "error",
+        title: "Cannot move the card here",
+        description: `${repo.label}'s project has no such status.`,
+      });
+      return;
+    }
+    if (card.statusOptionId === target.optionId) return;
+    setMoves((current) => new Map(current).set(itemId, { base: board, optionId: target.optionId }));
+    pendingMoves.current[repo.key] = (pendingMoves.current[repo.key] ?? 0) + 1;
     const result = await moveItem({
-      environmentId: project.environmentId,
+      environmentId: repo.project.environmentId,
       input: {
-        cwd: project.workspaceRoot,
+        cwd: repo.project.workspaceRoot,
         projectId: board.projectId,
         itemId,
-        fieldId: board.statusFieldId,
-        optionId,
+        fieldId: target.fieldId,
+        optionId: target.optionId,
       },
     });
-    pendingMoves.current -= 1;
+    pendingMoves.current[repo.key] = (pendingMoves.current[repo.key] ?? 1) - 1;
     if (result._tag === "Failure") {
       setMoves((current) => {
-        const byItem = new Map(current.byItem);
-        byItem.delete(itemId);
-        return { base: current.base, byItem };
+        const next = new Map(current);
+        next.delete(itemId);
+        return next;
       });
       if (!isAtomCommandInterrupted(result)) {
         toastManager.add({
@@ -213,13 +265,14 @@ export function ProjectBoardPage(props: {
       return;
     }
     // Rapid drags are each shown at once; one read after the last settles confirms them all.
-    if (pendingMoves.current === 0) query.refresh();
+    if (pendingMoves.current[repo.key] === 0) refreshRepo(repo.key);
   };
 
-  const startThread = async (item: ProjectBoardItem) => {
-    if (project === null) return;
+  const startThread = async (item: BoardCardItem) => {
+    const repo = repoOf(item.repoKey);
+    if (repo === undefined) return;
     const opened = await openDraftWithPrompt(
-      scopeProjectRef(project.environmentId, project.id),
+      scopeProjectRef(repo.project.environmentId, repo.project.id),
       startThreadPrompt(item),
     );
     if (!opened) {
@@ -227,16 +280,10 @@ export function ProjectBoardPage(props: {
     }
   };
 
-  const environmentLabels = new Map(
-    environments.map((environment) => [environment.environmentId, environment.label] as const),
-  );
-  const projectOptionKey = (candidate: { environmentId: string; id: string }) =>
-    `${candidate.environmentId}:${candidate.id}`;
-
   let body: ReactNode;
   if (!projectsKnown) {
     body = <BoardStatus>Loading projects…</BoardStatus>;
-  } else if (project === null) {
+  } else if (repos.length === 0) {
     body = (
       <Empty>
         <EmptyHeader>
@@ -247,24 +294,15 @@ export function ProjectBoardPage(props: {
         </EmptyHeader>
       </Empty>
     );
-  } else if (query.data === null && query.error === null) {
-    body = <BoardStatus>Loading board…</BoardStatus>;
-  } else if (query.data === null) {
-    body = (
-      <BoardError
-        message={query.error ?? ""}
-        scopeMissing={
-          isProjectBoardError(query.failure) && query.failure.reason === "scope_missing"
-        }
-      />
-    );
-  } else if (board === null) {
+  } else if (loaded.length === 0 && states.some((state) => !state.settled)) {
+    body = <BoardStatus>Loading boards…</BoardStatus>;
+  } else if (loaded.length === 0 && failures.length === 0) {
     body = (
       <Empty>
         <EmptyHeader>
-          <EmptyTitle>No GitHub Project is linked to this repository.</EmptyTitle>
+          <EmptyTitle>No GitHub Project is linked to any of your repositories.</EmptyTitle>
           <EmptyDescription>
-            Link a project to the repository on GitHub to see it here.
+            Link a project to a repository on GitHub to see it here.
           </EmptyDescription>
         </EmptyHeader>
       </Empty>
@@ -272,25 +310,22 @@ export function ProjectBoardPage(props: {
   } else {
     body = (
       <div className="flex min-h-0 flex-col gap-3">
-        {query.error === null ? null : (
-          <BoardError
-            message={query.error}
-            scopeMissing={
-              isProjectBoardError(query.failure) && query.failure.reason === "scope_missing"
-            }
-          />
-        )}
-        {board.truncated ? (
-          <p className="text-xs text-muted-foreground">
-            Showing the first 100 items of this project.
-          </p>
-        ) : null}
+        {failures.length === 0 ? null : <BoardError failures={failures} />}
+        {shown
+          .filter((entry) => entry.board.truncated)
+          .map((entry) => (
+            <p key={entry.repoKey} className="text-xs text-muted-foreground">
+              Showing the first 100 items of {repoOf(entry.repoKey)?.label}&apos;s project.
+            </p>
+          ))}
         <div className="flex items-start gap-3 overflow-x-auto pb-2">
           {columns.map((column) => (
             <BoardColumn
               key={column.key}
               column={column}
-              canDrag={canDrag}
+              repos={repos}
+              canDrag={canMove}
+              droppable={dragged !== undefined && dropTarget(dragged, column.key) !== null}
               over={overKey === column.key}
               draggingId={draggingId}
               onDragStart={setDraggingId}
@@ -302,7 +337,7 @@ export function ProjectBoardPage(props: {
               onDrop={(itemId) => {
                 setDraggingId(null);
                 setOverKey(null);
-                void dropOnColumn(itemId, column.optionId);
+                void dropOnColumn(itemId, column.key);
               }}
               onStartThread={(item) => void startThread(item)}
             />
@@ -323,50 +358,47 @@ export function ProjectBoardPage(props: {
               </WorkspaceBreadcrumbItem>
             </WorkspaceBreadcrumb>
             <div className="min-w-0 flex-1" />
-            {candidates.length > 1 && project !== null ? (
-              <BoardSelect
-                label="Repository"
-                value={projectOptionKey(project)}
-                onChange={(value) => {
-                  const next = candidates.find(
-                    (candidate) => projectOptionKey(candidate) === value,
-                  );
-                  if (next !== undefined) onSelectProject(next);
-                }}
-              >
-                {candidates.map((candidate) => (
-                  <option key={projectOptionKey(candidate)} value={projectOptionKey(candidate)}>
-                    {environments.length > 1
-                      ? `${candidate.title} (${environmentLabels.get(candidate.environmentId) ?? candidate.environmentId})`
-                      : candidate.title}
-                  </option>
-                ))}
-              </BoardSelect>
-            ) : null}
-            {githubProjects.length > 1 && board !== null && choiceKey !== null ? (
-              <BoardSelect
-                label="Project"
-                value={String(board.projectNumber)}
-                onChange={(value) => {
-                  const next = Number(value);
-                  rememberProjectNumber(choiceKey, next);
-                  setChosen((current) => ({ ...current, [choiceKey]: next }));
-                }}
-              >
-                {githubProjects.map((githubProject) => (
-                  <option key={githubProject.id} value={String(githubProject.number)}>
-                    {githubProject.title}
-                  </option>
-                ))}
-              </BoardSelect>
-            ) : null}
-            {board === null ? null : (
+            {boardRepos.length === 0 ? null : (
+              <Menu>
+                <MenuTrigger render={<Button variant="outline" size="sm" />}>
+                  Repositories ({activeKeys.size}/{boardRepos.length})
+                </MenuTrigger>
+                <MenuPopup align="end" side="bottom">
+                  {boardRepos.map((repo) => (
+                    <MenuCheckboxItem
+                      key={repo.key}
+                      checked={activeKeys.has(repo.key)}
+                      onCheckedChange={(next) =>
+                        pickRepositories(
+                          next
+                            ? [...activeKeys, repo.key]
+                            : [...activeKeys].filter((key) => key !== repo.key),
+                        )
+                      }
+                    >
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span
+                          aria-hidden
+                          className={cn(
+                            "size-2 shrink-0 rounded-full",
+                            repositoryAccent(repo.label).dot,
+                          )}
+                        />
+                        <ProjectFavicon project={repo.project} className="size-3.5 shrink-0" />
+                        <span className="min-w-0 truncate">{repo.label}</span>
+                      </span>
+                    </MenuCheckboxItem>
+                  ))}
+                </MenuPopup>
+              </Menu>
+            )}
+            {loaded.length === 0 ? null : (
               <>
                 <BoardSelect
                   label="Label"
                   value={filters.label ?? ""}
                   onChange={(value) =>
-                    setFilters({ ...filters, label: value === "" ? null : value })
+                    setFilterState({ ...filters, label: value === "" ? null : value })
                   }
                 >
                   <option value="">All labels</option>
@@ -379,7 +411,9 @@ export function ProjectBoardPage(props: {
                 <BoardSelect
                   label="State"
                   value={filters.state}
-                  onChange={(value) => setFilters({ ...filters, state: value as BoardStateFilter })}
+                  onChange={(value) =>
+                    setFilterState({ ...filters, state: value as BoardStateFilter })
+                  }
                 >
                   <option value="all">All</option>
                   <option value="open">Open</option>
@@ -389,7 +423,7 @@ export function ProjectBoardPage(props: {
                   label="Assignee"
                   value={filters.assignee ?? ""}
                   onChange={(value) =>
-                    setFilters({ ...filters, assignee: value === "" ? null : value })
+                    setFilterState({ ...filters, assignee: value === "" ? null : value })
                   }
                 >
                   <option value="">All assignees</option>
@@ -405,10 +439,10 @@ export function ProjectBoardPage(props: {
               size="icon-sm"
               variant="ghost"
               aria-label="Refresh board"
-              disabled={project === null || query.isPending}
-              onClick={query.refresh}
+              disabled={repos.length === 0 || pending}
+              onClick={() => boardAtoms.forEach((atom) => registry.refresh(atom))}
             >
-              <RefreshIcon size="md" refreshing={query.isPending} />
+              <RefreshIcon size="md" refreshing={pending} />
             </Button>
           </div>
         </WorkspacePageHeader>
@@ -427,23 +461,34 @@ function BoardStatus(props: { readonly children: ReactNode }) {
   );
 }
 
-function BoardError(props: { readonly message: string; readonly scopeMissing: boolean }) {
+function BoardError(props: {
+  readonly failures: ReadonlyArray<{
+    readonly repo: { readonly label: string };
+    readonly error: string | null;
+    readonly scopeMissing: boolean;
+  }>;
+}) {
+  const scopeMissing = props.failures.some((failure) => failure.scopeMissing);
+  const others = props.failures.filter((failure) => !failure.scopeMissing);
   return (
     <Alert variant="error">
       <AlertTitle>
-        {props.scopeMissing ? "GitHub Projects access is missing" : "Could not load the board"}
+        {scopeMissing ? "GitHub Projects access is missing" : "Could not load some boards"}
       </AlertTitle>
       <AlertDescription>
-        {props.scopeMissing ? (
+        {scopeMissing ? (
           <>
             <p>Your GitHub token cannot read Projects. Run this, then refresh:</p>
             <code className="mt-1 inline-block rounded-sm bg-muted px-1.5 py-0.5 font-mono text-xs">
               {PROJECT_BOARD_SCOPE_COMMAND}
             </code>
           </>
-        ) : (
-          props.message
-        )}
+        ) : null}
+        {others.map((failure) => (
+          <p key={failure.repo.label}>
+            {failure.repo.label}: {failure.error}
+          </p>
+        ))}
       </AlertDescription>
     </Alert>
   );
@@ -471,14 +516,17 @@ function BoardSelect(props: {
 
 function BoardColumn(props: {
   readonly column: BoardColumnView;
+  readonly repos: ReadonlyArray<Repository>;
   readonly canDrag: boolean;
+  /** The card being dragged can take this column's status. */
+  readonly droppable: boolean;
   readonly over: boolean;
   readonly draggingId: string | null;
   readonly onDragStart: (itemId: string) => void;
   readonly onDragOver: (columnKey: string) => void;
   readonly onDragEnd: () => void;
   readonly onDrop: (itemId: string) => void;
-  readonly onStartThread: (item: ProjectBoardItem) => void;
+  readonly onStartThread: (item: BoardCardItem) => void;
 }) {
   const { column } = props;
   return (
@@ -486,10 +534,10 @@ function BoardColumn(props: {
       aria-label={column.name}
       className={cn(
         "flex w-72 shrink-0 flex-col gap-2 rounded-lg border bg-muted/30 p-2",
-        props.over ? "border-primary" : "border-border",
+        props.over && props.droppable ? "border-primary" : "border-border",
       )}
       onDragOver={(event) => {
-        if (!props.canDrag || props.draggingId === null) return;
+        if (!props.canDrag || !props.droppable) return;
         event.preventDefault();
         event.dataTransfer.dropEffect = "move";
         props.onDragOver(column.key);
@@ -518,6 +566,7 @@ function BoardColumn(props: {
           <BoardCard
             key={item.itemId}
             item={item}
+            repo={props.repos.find((repo) => repo.key === item.repoKey)}
             draggable={props.canDrag}
             dimmed={props.draggingId === item.itemId}
             onDragStart={props.onDragStart}
@@ -531,14 +580,15 @@ function BoardColumn(props: {
 }
 
 function BoardCard(props: {
-  readonly item: ProjectBoardItem;
+  readonly item: BoardCardItem;
+  readonly repo: Repository | undefined;
   readonly draggable: boolean;
   readonly dimmed: boolean;
   readonly onDragStart: (itemId: string) => void;
   readonly onDragEnd: () => void;
-  readonly onStartThread: (item: ProjectBoardItem) => void;
+  readonly onStartThread: (item: BoardCardItem) => void;
 }) {
-  const { item } = props;
+  const { item, repo } = props;
   const url = item.url;
   const badge =
     item.kind === "draft"
@@ -552,7 +602,8 @@ function BoardCard(props: {
     <li
       draggable={props.draggable}
       className={cn(
-        "flex flex-col gap-2 rounded-md border border-border bg-card p-2.5 text-sm text-card-foreground",
+        "flex flex-col gap-2 rounded-md border border-l-4 border-border bg-card p-2.5 text-sm text-card-foreground",
+        repo === undefined ? undefined : repositoryAccent(repo.label).border,
         props.dimmed && "opacity-50",
       )}
       onDragStart={(event) => {
@@ -562,6 +613,12 @@ function BoardCard(props: {
       }}
       onDragEnd={props.onDragEnd}
     >
+      {repo === undefined ? null : (
+        <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+          <ProjectFavicon project={repo.project} className="size-3 shrink-0" />
+          <span className="truncate">{repo.label}</span>
+        </div>
+      )}
       <div className="flex items-start gap-2">
         {item.number === null ? null : (
           <span className="shrink-0 tabular-nums text-xs text-muted-foreground">
