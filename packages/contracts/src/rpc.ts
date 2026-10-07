@@ -340,6 +340,12 @@ import {
 } from "./sourceControl.ts";
 import { VcsError } from "./vcs.ts";
 import { Project, ProjectMutation, ProjectMutationError } from "./project.ts";
+import {
+  MoveProjectBoardItemInput,
+  ProjectBoardError,
+  ProjectBoardInput,
+  ProjectBoardResult,
+} from "./projectBoard.ts";
 
 export const WS_METHODS = {
   // Project registry methods
@@ -523,6 +529,8 @@ export const WS_METHODS = {
   sourceControlLookupRepository: "sourceControl.lookupRepository",
   sourceControlCloneRepository: "sourceControl.cloneRepository",
   sourceControlPublishRepository: "sourceControl.publishRepository",
+  sourceControlGetProjectBoard: "sourceControl.getProjectBoard",
+  sourceControlMoveProjectBoardItem: "sourceControl.moveProjectBoardItem",
   projectCloneStart: "projectClone.start",
   projectCloneCancel: "projectClone.cancel",
   projectCloneRetry: "projectClone.retry",
@@ -1087,6 +1095,21 @@ const WsSourceControlLookupRepositoryRpc = Rpc.make(WS_METHODS.sourceControlLook
   success: SourceControlRepositoryInfo,
   error: Schema.Union([SourceControlRepositoryError, EnvironmentAuthorizationError]),
 });
+
+const WsSourceControlGetProjectBoardRpc = Rpc.make(WS_METHODS.sourceControlGetProjectBoard, {
+  payload: ProjectBoardInput,
+  success: ProjectBoardResult,
+  error: Schema.Union([ProjectBoardError, EnvironmentAuthorizationError]),
+});
+
+const WsSourceControlMoveProjectBoardItemRpc = Rpc.make(
+  WS_METHODS.sourceControlMoveProjectBoardItem,
+  {
+    payload: MoveProjectBoardItemInput,
+    success: Schema.Void,
+    error: Schema.Union([ProjectBoardError, EnvironmentAuthorizationError]),
+  },
+);
 
 const WsSourceControlCloneRepositoryRpc = Rpc.make(WS_METHODS.sourceControlCloneRepository, {
   payload: SourceControlCloneRepositoryInput,
@@ -1834,6 +1857,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsPullRequestsLabelCandidatesRpc,
   WsPullRequestsSetLabelsRpc,
   WsSourceControlLookupRepositoryRpc,
+  WsSourceControlGetProjectBoardRpc,
+  WsSourceControlMoveProjectBoardItemRpc,
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,
   WsProjectCloneStartRpc,

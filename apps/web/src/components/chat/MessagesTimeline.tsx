@@ -179,6 +179,7 @@ import {
   timelineContentOverflowsViewport,
 } from "./timelineScrollAnchoring";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { ForkThreadMenu, type ForkWorktreeSource } from "./ForkThreadMenu";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { inferEntryKindFromPath } from "../../pierre-icons";
 import { AssistantSelectionToolbar } from "./AssistantSelectionToolbar";
@@ -320,7 +321,9 @@ interface TimelineRowSharedState {
   onForkFromRun: (input: {
     readonly sourceThreadId: ThreadId;
     readonly runId: RunId;
+    readonly newWorktree?: { readonly baseBranch: string };
   }) => Promise<void>;
+  forkWorktreeSource: ForkWorktreeSource | null;
   onRollbackCheckpoint: (input: {
     readonly checkpointId: string;
     readonly scopeId: string;
@@ -451,7 +454,10 @@ interface MessagesTimelineProps {
   onForkFromRun: (input: {
     readonly sourceThreadId: ThreadId;
     readonly runId: RunId;
+    readonly newWorktree?: { readonly baseBranch: string };
   }) => Promise<void>;
+  /** Offers forking into a new worktree; null when the project is not a git repository. */
+  forkWorktreeSource?: ForkWorktreeSource | null;
   onRollbackCheckpoint: (input: {
     readonly checkpointId: string;
     readonly scopeId: string;
@@ -530,6 +536,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onOpenThread,
   parentThreadLink = null,
   onForkFromRun,
+  forkWorktreeSource = null,
   onRollbackCheckpoint,
   supportsConversationRollback,
   onRevertToTurnCount,
@@ -1174,6 +1181,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onOpenTurnDiff,
       onOpenThread,
       onForkFromRun,
+      forkWorktreeSource,
       onRollbackCheckpoint,
       onToggleTurnFold,
       onToggleAttemptFold,
@@ -1209,6 +1217,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onOpenTurnDiff,
       onOpenThread,
       onForkFromRun,
+      forkWorktreeSource,
       onRollbackCheckpoint,
       onToggleTurnFold,
       onToggleAttemptFold,
@@ -2562,6 +2571,27 @@ function AssistantForkButton({
 
   if (!canFork || projectedItem.item.runId === null) return null;
   const runId = projectedItem.item.runId;
+  const fork = (newWorktree?: { readonly baseBranch: string }) => {
+    setBusy(true);
+    void ctx
+      .onForkFromRun({
+        sourceThreadId: projectedItem.sourceThreadId,
+        runId,
+        ...(newWorktree ? { newWorktree } : {}),
+      })
+      .finally(() => setBusy(false));
+  };
+
+  if (ctx.forkWorktreeSource) {
+    return (
+      <ForkThreadMenu
+        environmentId={ctx.activeThreadEnvironmentId}
+        source={ctx.forkWorktreeSource}
+        busy={busy}
+        onFork={fork}
+      />
+    );
+  }
 
   return (
     <Tooltip>
@@ -2572,12 +2602,7 @@ function AssistantForkButton({
             size="xs"
             variant="ghost"
             disabled={busy}
-            onClick={() => {
-              setBusy(true);
-              void ctx
-                .onForkFromRun({ sourceThreadId: projectedItem.sourceThreadId, runId })
-                .finally(() => setBusy(false));
-            }}
+            onClick={() => fork()}
             aria-label="Fork from this response"
           />
         }

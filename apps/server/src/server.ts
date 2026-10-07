@@ -50,7 +50,11 @@ import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as CheckpointStore from "./checkpointing/CheckpointStore.ts";
 import * as AzureDevOpsCli from "./sourceControl/AzureDevOpsCli.ts";
 import * as BitbucketApi from "./sourceControl/BitbucketApi.ts";
+import * as GitHubApi from "./sourceControl/GitHubApi.ts";
 import * as GitHubCli from "./sourceControl/GitHubCli.ts";
+import * as GitHubCredentials from "./sourceControl/GitHubCredentials.ts";
+import * as GitHubGraphQlBudget from "./sourceControl/githubGraphQlBudget.ts";
+import * as GitHubProjectBoard from "./sourceControl/GitHubProjectBoard.ts";
 import * as GitLabCli from "./sourceControl/GitLabCli.ts";
 import * as ForgejoCli from "./sourceControl/ForgejoCli.ts";
 import * as TextGeneration from "./textGeneration/TextGeneration.ts";
@@ -349,6 +353,19 @@ const layerSourceControlRepositoryService = SourceControlRepositoryService.layer
   Layer.provideMerge(layerSourceControlProviderRegistry),
 );
 
+// The GitHubApi stack GitHubCli and the pull-request provider build too: one layer object each, so
+// the board shares their credential, GraphQL budget and rate-limit pause per host.
+const layerGitHubProjectBoard = GitHubProjectBoard.layer.pipe(
+  Layer.provide(
+    GitHubApi.layer.pipe(
+      Layer.provide(GitHubCredentials.layer),
+      Layer.provide(GitHubGraphQlBudget.layer),
+      Layer.provide(SourceControlRateLimit.layer),
+    ),
+  ),
+  Layer.provide(layerRepositoryIdentityResolver),
+);
+
 const layerProjectCloneTracker = ProjectCloneTracker.layer.pipe(
   Layer.provide(layerSourceControlRepositoryService),
 );
@@ -365,6 +382,7 @@ const layerVcs = Layer.empty.pipe(
   Layer.provideMerge(layerGitWorkflow),
   Layer.provideMerge(layerReview),
   Layer.provideMerge(layerSourceControlRepositoryService),
+  Layer.provideMerge(layerGitHubProjectBoard),
   Layer.provideMerge(layerProjectCloneTracker),
   Layer.provideMerge(
     VcsStatusBroadcaster.layer.pipe(

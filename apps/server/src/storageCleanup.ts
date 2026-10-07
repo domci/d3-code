@@ -80,13 +80,23 @@ function sameProjectWorktreePolicies(left: ServerSettings, right: ServerSettings
   );
 }
 
+/** Statuses of a thread whose last run has finished (no run in flight). */
+const STORAGE_CLEANUP_IDLE_STATUSES: ReadonlySet<OrchestrationV2ThreadShell["status"]> = new Set([
+  "idle",
+  "failed",
+  "completed",
+  "cancelled",
+  "interrupted",
+  "rolled_back",
+]);
+
 /** Live sessions keep their cwd even when no turn is currently running. */
 export function storageCleanupThreadIdle(thread: OrchestrationV2ThreadShell, now: number): boolean {
   return (
     thread.branch !== null &&
     thread.worktreePath !== null &&
     thread.activeRunId === null &&
-    (thread.status === "idle" || thread.status === "failed") &&
+    STORAGE_CLEANUP_IDLE_STATUSES.has(thread.status) &&
     (thread.pendingBackgroundTasks?.length ?? 0) === 0 &&
     thread.pendingRuntimeRequest === null &&
     !threadHasQueuedTurnStart(thread, now)

@@ -33,6 +33,10 @@ ACP fallback: some ACP agents accept the injected MCP server but fail to expose 
 ### Showing visuals
 
 When a chart, table, diagram, image collage, or mockup would say more than prose, build a self-contained HTML page, check it with \`html_preview\`, then publish it with \`html_render\` before your final reply. The reader sees the page above that reply, so don't announce or restate it; add only what it doesn't say.
+
+### Suggesting follow-up work
+
+If you notice a worthwhile follow-up that is outside the current task (a bug, a missing test, a stale doc), do not act on it. Propose it by adding a fenced code block with the language \`t3-task\` whose body is a single JSON object with the string fields \`title\` (imperative, under 60 characters), \`summary\` (one or two sentences on why it matters) and \`prompt\` (a self-contained instruction for a fresh agent that cannot see this conversation, including file paths). T3 Code shows it to the user as a card that starts a new thread. Use it sparingly, only for concrete findings you have verified.
 `;
 
 export const T3_CODE_BROWSER_TOOL_INSTRUCTIONS = `

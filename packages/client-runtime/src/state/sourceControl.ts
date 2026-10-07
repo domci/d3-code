@@ -25,6 +25,20 @@ export function createSourceControlEnvironmentAtoms<R, E>(
       label: "environment-data:source-control:repository",
       tag: WS_METHODS.sourceControlLookupRepository,
     }),
+    projectBoard: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:source-control:project-board",
+      tag: WS_METHODS.sourceControlGetProjectBoard,
+    }),
+    moveProjectBoardItem: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:source-control:move-project-board-item",
+      tag: WS_METHODS.sourceControlMoveProjectBoardItem,
+      // A card dropped twice in a row lands in the order it was dropped. Its own lane, not the
+      // clone commands' scheduler, so a move never waits behind a clone.
+      concurrency: {
+        mode: "serial",
+        key: ({ environmentId }) => environmentId,
+      },
+    }),
     cloneRepository: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:source-control:clone-repository",
       tag: WS_METHODS.sourceControlCloneRepository,

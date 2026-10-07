@@ -140,6 +140,7 @@ import {
   latestUnheldRun,
   usageLimitRunPresentedAsLatest,
 } from "@t3tools/shared/orchestrationV2ThreadError";
+import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
 import { truncate } from "@t3tools/shared/String";
@@ -1652,6 +1653,12 @@ export default function ChatView(props: ChatViewProps) {
     reportFailure: false,
   });
   const forkThreadFromRun = useAtomCommand(threadEnvironment.forkFromRun, {
+    reportFailure: false,
+  });
+  const createGitWorktree = useAtomCommand(vcsEnvironment.createWorktree, {
+    reportFailure: false,
+  });
+  const removeGitWorktree = useAtomCommand(vcsEnvironment.removeWorktree, {
     reportFailure: false,
   });
   const openPreview = useAtomCommand(previewEnvironment.open, { reportFailure: false });
@@ -8562,7 +8569,11 @@ export default function ChatView(props: ChatViewProps) {
   );
 
   const onForkFromRun = useCallback(
-    async (input: { readonly sourceThreadId: ThreadId; readonly runId: RunId }) => {
+    async (input: {
+      readonly sourceThreadId: ThreadId;
+      readonly runId: RunId;
+      readonly newWorktree?: { readonly baseBranch: string };
+    }) => {
       if (!activeThread || activeEnvironmentUnavailable) return;
       const targetThreadId = newThreadId();
       const targetThreadRef = scopeThreadRef(environmentId, targetThreadId);
@@ -8593,6 +8604,56 @@ export default function ChatView(props: ChatViewProps) {
         );
         return;
       }
+      if (input.newWorktree) {
+        // The fork exists on the source's worktree already, so a failure below still opens it.
+        const projectCwd = activeProject?.workspaceRoot;
+        const reasonOf = (failed: { readonly cause: Cause.Cause<unknown> }) => {
+          const error = squashAtomCommandFailure(failed);
+          return error instanceof Error ? error.message : "unknown error";
+        };
+        let setupFailure: string | null = null;
+        if (!projectCwd) {
+          setupFailure = "the project is unavailable";
+        } else {
+          // ponytail: a forked worktree skips the project's runOnWorktreeCreate setup script; move provisioning server-side (ThreadLaunchService) if that is needed.
+          const created = await createGitWorktree({
+            environmentId,
+            input: {
+              cwd: projectCwd,
+              refName: input.newWorktree.baseBranch,
+              newRefName: buildTemporaryWorktreeBranchName(randomUUID),
+              baseRefName: input.newWorktree.baseBranch,
+              path: null,
+            },
+          });
+          if (created._tag === "Failure") {
+            setupFailure = reasonOf(created);
+          } else {
+            const { path, refName } = created.value.worktree;
+            const pointed = await updateThreadMetadata({
+              environmentId,
+              input: { threadId: targetThreadId, branch: refName, worktreePath: path },
+            });
+            if (pointed._tag === "Failure") {
+              setupFailure = reasonOf(pointed);
+              void removeGitWorktree({
+                environmentId,
+                input: { cwd: projectCwd, path, force: true },
+              });
+            }
+          }
+        }
+        if (setupFailure !== null) {
+          // A toast, not the source thread's error banner: the fork is opened right below.
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Fork is using the original worktree",
+              description: `Its new worktree could not be set up: ${setupFailure}`,
+            }),
+          );
+        }
+      }
       await navigate({
         to: "/$environmentId/$threadId",
         params: buildThreadRouteParams(targetThreadRef),
@@ -8600,12 +8661,27 @@ export default function ChatView(props: ChatViewProps) {
     },
     [
       activeEnvironmentUnavailable,
+      activeProject,
       activeThread,
+      createGitWorktree,
       environmentId,
       forkThreadFromRun,
       navigate,
+      removeGitWorktree,
       setThreadError,
+      updateThreadMetadata,
     ],
+  );
+  const gitStatusRefName = gitStatusQuery.data?.refName ?? null;
+  const forkWorktreeSource = useMemo(
+    () =>
+      isGitRepo && canWriteSourceControl && activeProject
+        ? {
+            cwd: activeProject.workspaceRoot,
+            defaultBaseBranch: activeThreadBranch ?? gitStatusRefName,
+          }
+        : null,
+    [activeProject, activeThreadBranch, canWriteSourceControl, gitStatusRefName, isGitRepo],
   );
   const onCompactContext = () => {
     if (compactDisabled) return;
@@ -11353,6 +11429,7 @@ export default function ChatView(props: ChatViewProps) {
                 onOpenThread={onOpenRelatedThread}
                 parentThreadLink={paintOnlyDisplayedTimeline ? null : parentThreadLink}
                 onForkFromRun={paintOnlyDisplayedTimeline ? async () => {} : onForkFromRun}
+                forkWorktreeSource={paintOnlyDisplayedTimeline ? null : forkWorktreeSource}
                 onRollbackCheckpoint={(input) => {
                   if (!paintOnlyDisplayedTimeline) void onRollbackCheckpoint(input);
                 }}

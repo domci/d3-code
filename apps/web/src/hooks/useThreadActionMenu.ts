@@ -73,8 +73,10 @@ export function useThreadActionMenu(input: {
   /** Fallback for "Copy path" when the thread has no worktree. */
   readonly projectCwd: string | null;
   readonly onStartRename: () => void;
+  /** Runs before "Project settings" leaves the page, e.g. to close a mobile sidebar. */
+  readonly onOpenProjectSettings?: () => void;
 }) {
-  const { threadRef, projectCwd, onStartRename } = input;
+  const { threadRef, projectCwd, onStartRename, onOpenProjectSettings } = input;
   const router = useRouter();
   const projects = useProjects();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -206,6 +208,7 @@ export function useThreadActionMenu(input: {
             const projectKey =
               logicalProjectKeyByPhysicalKey.get(derivePhysicalProjectKey(project)) ??
               deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings);
+            onOpenProjectSettings?.();
             void router.navigate({
               to: "/projects/$projectKey",
               params: { projectKey },
@@ -352,6 +355,7 @@ export function useThreadActionMenu(input: {
       handleNewThread,
       logicalProjectKeyByPhysicalKey,
       markThreadUnread,
+      onOpenProjectSettings,
       onStartRename,
       pinThread,
       projectCwd,

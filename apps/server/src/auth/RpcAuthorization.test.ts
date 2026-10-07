@@ -142,6 +142,15 @@ describe("RPC authorization scopes", () => {
     );
   });
 
+  it("separates reading a project board from moving a card on it", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.sourceControlGetProjectBoard)).toBe(
+      AuthOrchestrationReadScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.sourceControlMoveProjectBoardItem)).toBe(
+      AuthSourceControlWriteScope,
+    );
+  });
+
   it("separates preview control from observation", () => {
     for (const method of [
       WS_METHODS.previewOpen,

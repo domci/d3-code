@@ -80,6 +80,11 @@ describe("V2 storage cleanup eligibility", () => {
     },
   );
 
+  it("treats a thread whose last run finished as idle", () => {
+    expect(storageCleanupThreadIdle(candidateWithStatus("completed"), NOW_MS)).toBe(true);
+    expect(storageCleanupThreadIdle(candidateWithStatus("running"), NOW_MS)).toBe(false);
+  });
+
   it("retains an active run even if the shell status is idle", () => {
     expect(
       storageCleanupThreadIdle({ ...candidate(), activeRunId: RunId.make("run") }, NOW_MS),
