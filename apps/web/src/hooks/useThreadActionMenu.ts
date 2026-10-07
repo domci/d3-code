@@ -149,12 +149,17 @@ export function useThreadActionMenu(input: {
         // Latest stable fork needs a finished run and no run in flight; the
         // server still has the last word (it wants a completed, checkpointed run).
         const canFork = thread.latestRun !== null && threadRuntimeCanArchive(thread.runtime);
+        // A thread with a branch is in a git project already; only ask git for
+        // the project's branch (which can time out before status loads) without one.
+        const canCreateWorktree =
+          project !== undefined &&
+          readEnvironmentScope(threadRef.environmentId, AuthSourceControlWriteScope);
         const projectGit =
-          project && readEnvironmentScope(threadRef.environmentId, AuthSourceControlWriteScope)
+          canCreateWorktree && thread.branch === null
             ? await readProjectGitBranch(threadRef.environmentId, project.workspaceRoot)
             : null;
-        const worktreeBaseBranch = projectGit?.isRepo
-          ? (thread.branch ?? projectGit.refName)
+        const worktreeBaseBranch = canCreateWorktree
+          ? (thread.branch ?? (projectGit?.isRepo ? projectGit.refName : null))
           : null;
         const now = new Date();
         const supports = {
