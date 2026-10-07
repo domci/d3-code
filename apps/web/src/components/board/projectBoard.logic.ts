@@ -134,6 +134,17 @@ export interface BoardRepository<Project> {
   readonly project: Project;
 }
 
+/** `owner/name` of a repository identity. */
+export function repositoryLabel(identity: {
+  readonly canonicalKey: string;
+  readonly owner?: string | undefined;
+  readonly name?: string | undefined;
+}): string {
+  return identity.owner !== undefined && identity.name !== undefined
+    ? `${identity.owner}/${identity.name}`
+    : identity.canonicalKey.split("/").slice(-2).join("/");
+}
+
 /** Dot-directories, temp directories, agent checkouts and hash-named folders are throwaway copies. */
 const looksTemporary = (root: string) =>
   /(^|[\\/])\.[^\\/]|[\\/]te?mp[\\/]/i.test(root) ||
@@ -170,11 +181,7 @@ export function dedupeBoardRepositories<
     ) {
       continue;
     }
-    const label =
-      identity.owner !== undefined && identity.name !== undefined
-        ? `${identity.owner}/${identity.name}`
-        : identity.canonicalKey.split("/").slice(-2).join("/");
-    repositories.set(key, { key, label, project });
+    repositories.set(key, { key, label: repositoryLabel(identity), project });
   }
   return [...repositories.values()];
 }

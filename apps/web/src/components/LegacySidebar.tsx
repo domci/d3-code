@@ -25,6 +25,7 @@ import {
   useLinkedThreadPullRequest,
 } from "./ThreadStatusIndicators";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
+import { repositoryAccent, repositoryLabel } from "./board/projectBoard.logic";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { useAtomValue } from "@effect/atom-react";
 import { autoAnimate } from "@formkit/auto-animate";
@@ -2333,9 +2334,20 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     [isMobile, memberProjectByScopedKey, project.workspaceRoot, setOpenMobile, startThreadRename],
   );
 
+  // The Board's colour for this repository (the group's first GitHub member).
+  const repositoryIdentity =
+    project.memberProjects.find((member) => member.repositoryIdentity?.provider === "github")
+      ?.repositoryIdentity ?? undefined;
+
   return (
     <>
       <div className="group/project-header relative">
+        {repositoryIdentity === undefined ? null : (
+          <span
+            aria-hidden
+            className={`pointer-events-none absolute inset-y-0 left-0 z-10 w-0.5 rounded-full ${repositoryAccent(repositoryLabel(repositoryIdentity)).dot}`}
+          />
+        )}
         <SidebarMenuButton
           ref={isManualProjectSorting ? dragHandleProps?.setActivatorNodeRef : undefined}
           className={isManualProjectSorting ? "cursor-grab active:cursor-grabbing" : undefined}
