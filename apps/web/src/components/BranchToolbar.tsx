@@ -2,6 +2,7 @@ import { ComposerContextLabel } from "./ComposerContextLabel";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import {
+  CheckIcon,
   ChevronDownIcon,
   FolderGit2Icon,
   FolderGitIcon,
@@ -52,7 +53,6 @@ import {
   MenuSeparator,
   MenuTrigger,
 } from "./ui/menu";
-import { Checkbox } from "./ui/checkbox";
 import { DraftProjectChip } from "./DraftProjectChip";
 import { Separator } from "./ui/separator";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
@@ -681,32 +681,49 @@ export const BranchToolbar = memo(function BranchToolbar({
           </span>
         ) : null}
         {showGitControls ? (
-          <span className={CHIP_CLASS}>
-            <BranchToolbarBranchSelector
-              forceNewWorktree={forceNewWorktree}
-              ref={branchSelectorRef}
-              className="min-w-0"
-              environmentId={environmentId}
-              threadId={threadId}
-              {...(draftId ? { draftId } : {})}
-              envLocked={envLocked}
-              effectiveEnvModeOverride={effectiveEnvMode}
-              startFromOrigin={startFromOrigin}
-              onStartFromOriginChange={onStartFromOriginChange}
-              {...(onCheckoutPullRequestRequest ? { onCheckoutPullRequestRequest } : {})}
-              {...(onComposerFocusRequest ? { onComposerFocusRequest } : {})}
-            />
-            <Separator orientation="vertical" className="mx-0.5 h-3.5!" />
-            <label className="flex shrink-0 cursor-pointer items-center gap-1.5 pe-2 ps-1">
-              <Checkbox
-                checked={worktreeChecked}
-                disabled={envModeLocked || forceNewWorktree}
-                onCheckedChange={(checked) => onEnvModeChange(checked ? "worktree" : "local")}
-                data-composer-shortcut="composer.workspace"
-              />
+          <>
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={worktreeChecked}
+              disabled={envModeLocked || forceNewWorktree}
+              onClick={() => onEnvModeChange(worktreeChecked ? "local" : "worktree")}
+              className={cn(
+                CHIP_CLASS,
+                "cursor-pointer gap-1.5 px-2 outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-64",
+              )}
+            >
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "flex size-3.5 shrink-0 items-center justify-center rounded-xs border",
+                  worktreeChecked
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-input bg-background",
+                )}
+              >
+                {worktreeChecked ? <CheckIcon className="size-2.5" strokeWidth={3} /> : null}
+              </span>
               worktree
-            </label>
-          </span>
+            </button>
+            <span className={CHIP_CLASS}>
+              <BranchToolbarBranchSelector
+                forceNewWorktree={forceNewWorktree}
+                ref={branchSelectorRef}
+                className="min-w-0"
+                readOnly={!worktreeChecked}
+                environmentId={environmentId}
+                threadId={threadId}
+                {...(draftId ? { draftId } : {})}
+                envLocked={envLocked}
+                effectiveEnvModeOverride={effectiveEnvMode}
+                startFromOrigin={startFromOrigin}
+                onStartFromOriginChange={onStartFromOriginChange}
+                {...(onCheckoutPullRequestRequest ? { onCheckoutPullRequestRequest } : {})}
+                {...(onComposerFocusRequest ? { onComposerFocusRequest } : {})}
+              />
+            </span>
+          </>
         ) : null}
       </div>
     );

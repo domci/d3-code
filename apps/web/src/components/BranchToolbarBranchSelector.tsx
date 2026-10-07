@@ -83,6 +83,8 @@ interface BranchToolbarBranchSelectorProps {
   ref?: Ref<BranchToolbarBranchSelectorHandle>;
   className?: string;
   displayMode?: "toolbar" | "panel";
+  /** Show the branch name without a picker. */
+  readOnly?: boolean;
   environmentId: EnvironmentId;
   threadId: ThreadId;
   draftId?: DraftId;
@@ -105,6 +107,7 @@ export function BranchToolbarBranchSelector({
   ref,
   className,
   displayMode = "toolbar",
+  readOnly = false,
   environmentId,
   threadId,
   draftId,
@@ -573,11 +576,11 @@ export function BranchToolbarBranchSelector({
     ref,
     () => ({
       open: () => {
-        if (isInitialBranchesLoadPending || isBranchActionPending) return;
+        if (readOnly || isInitialBranchesLoadPending || isBranchActionPending) return;
         handleOpenChange(true);
       },
     }),
-    [handleOpenChange, isBranchActionPending, isInitialBranchesLoadPending],
+    [handleOpenChange, isBranchActionPending, isInitialBranchesLoadPending, readOnly],
   );
 
   const triggerLabel = resolveBranchTriggerLabel({
@@ -696,6 +699,18 @@ export function BranchToolbarBranchSelector({
         onClick={() => selectPickerItem(itemValue)}
         onContextMenu={(event) => handleBranchContextMenu(event, itemValue)}
       />
+    );
+  }
+
+  if (readOnly) {
+    return (
+      <span
+        className={cn("inline-flex h-6 min-w-0 items-center gap-1 px-1.75", className)}
+        data-composer-context-control
+      >
+        <GitBranchIcon className="size-3 shrink-0 opacity-70" />
+        <MiddleTruncate value={triggerLabel} className="min-w-0" />
+      </span>
     );
   }
 
