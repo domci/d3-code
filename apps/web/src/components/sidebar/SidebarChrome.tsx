@@ -1,9 +1,17 @@
-import { ArrowLeftIcon, ChartNoAxesColumnIcon, KanbanIcon, SettingsIcon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  ChartNoAxesColumnIcon,
+  KanbanIcon,
+  MoonIcon,
+  SettingsIcon,
+  SunIcon,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { memo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
+import { useTheme } from "../../hooks/useTheme";
 import { cn } from "../../lib/utils";
 import { usePullRequestsSupported } from "../../state/environments";
 import {
@@ -13,6 +21,7 @@ import {
   useEnvironmentStageLabel,
 } from "../SidebarStageBackdrop";
 import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
 import {
   SidebarFooter,
   SidebarMenu,
@@ -71,9 +80,36 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
           </div>
         ) : null}
       </div>
+      <div className="relative z-10 shrink-0 [-webkit-app-region:no-drag]">
+        <ThemeToggle />
+      </div>
     </div>
   );
 });
+
+/** Always-visible light/dark switch in the sidebar titlebar. */
+function ThemeToggle() {
+  const { resolvedTheme, setTheme } = useTheme();
+  const next = resolvedTheme === "dark" ? "light" : "dark";
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            size="icon-xs"
+            variant="ghost"
+            aria-label={`Switch to ${next} mode`}
+            onClick={() => setTheme(next)}
+          />
+        }
+      >
+        {resolvedTheme === "dark" ? <SunIcon /> : <MoonIcon />}
+      </TooltipTrigger>
+      <TooltipPopup side="bottom">Switch to {next} mode</TooltipPopup>
+    </Tooltip>
+  );
+}
 
 // Measures the brand at its titlebar inset, plus the header's right padding and the
 // sidebar border, so the sidebar minimum follows font size, zoom and macOS window controls.
