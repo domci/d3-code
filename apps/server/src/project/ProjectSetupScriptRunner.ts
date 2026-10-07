@@ -380,7 +380,7 @@ export const make = Effect.gen(function* () {
     const terminalId =
       input.preferredTerminalId ??
       (trigger === "settle"
-        ? `settle-${script.id}-${NodeCrypto.randomUUID().slice(0, 8)}`
+        ? `settle-${script.id}-${(yield* crypto.randomUUIDv4.pipe(Effect.orDie)).slice(0, 8)}`
         : `setup-${script.id}`);
     const cwd = input.worktreePath;
     const env = {
