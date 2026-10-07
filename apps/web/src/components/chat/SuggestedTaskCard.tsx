@@ -2,6 +2,7 @@ import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import { useState } from "react";
 
+import { useComposerDraftStore } from "../../composerDraftStore";
 import { useOpenDraftWithPrompt } from "../../hooks/useOpenDraftWithPrompt";
 import { useThreadShell } from "../../state/entities";
 import { Button } from "../ui/button";
@@ -45,7 +46,7 @@ export function SuggestedTaskCard(props: {
     <div className="my-3 flex min-w-0 flex-col gap-2 rounded-xl border border-border/60 bg-card p-4">
       <div className="min-w-0 text-sm font-medium text-foreground">{task.title}</div>
       {task.summary ? <p className="text-sm text-muted-foreground">{task.summary}</p> : null}
-      <div>
+      <div className="flex flex-wrap items-center gap-2">
         <Button
           type="button"
           size="sm"
@@ -58,6 +59,26 @@ export function SuggestedTaskCard(props: {
           }}
         >
           Start thread
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          disabled={props.threadRef === undefined}
+          onClick={() => {
+            const threadRef = props.threadRef;
+            if (threadRef === undefined) return;
+            // Leaves the task in this thread's composer for the reader to review and send,
+            // after whatever they have already typed.
+            const store = useComposerDraftStore.getState();
+            const current = store.getComposerDraft(threadRef)?.prompt ?? "";
+            store.setPrompt(
+              threadRef,
+              current.trim() === "" ? task.prompt : `${current.trimEnd()}\n\n${task.prompt}`,
+            );
+          }}
+        >
+          Add to this session
         </Button>
       </div>
     </div>
