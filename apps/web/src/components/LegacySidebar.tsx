@@ -29,7 +29,7 @@ import { repositoryAccent, repositoryLabel } from "./board/projectBoard.logic";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { useAtomValue } from "@effect/atom-react";
 import { autoAnimate } from "@formkit/auto-animate";
-import React, { useCallback, useEffect, memo, useMemo, useRef, useState } from "react";
+import React, { Fragment, useCallback, useEffect, memo, useMemo, useRef, useState } from "react";
 import { cn } from "~/lib/utils";
 import { useShallow } from "zustand/react/shallow";
 import {
@@ -130,7 +130,7 @@ import { useDesktopUpdateState } from "../state/desktopUpdate";
 
 import { useThreadActions } from "../hooks/useThreadActions";
 import { useThreadActionMenu } from "../hooks/useThreadActionMenu";
-import { partitionSettledThreads } from "./LegacySidebar.logic";
+import { buildSubagentTree, partitionSettledThreads } from "./LegacySidebar.logic";
 import { projectEnvironment } from "../state/projects";
 import { threadEnvironment, useEnvironmentThread } from "../state/threads";
 import { useEnvironment, useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
@@ -329,6 +329,8 @@ function buildThreadJumpLabelMap(input: {
 
 interface SidebarThreadRowProps {
   thread: SidebarThreadSummary;
+  /** Subagent nesting level; children are indented and cannot be settled on their own. */
+  depth?: number;
   orderedProjectThreadKeys: readonly string[];
   isActive: boolean;
   openPullRequestsInRightPanel: boolean;
@@ -380,6 +382,7 @@ function checkTaskPermission(environmentId: EnvironmentId): boolean {
 
 const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowProps) {
   const {
+    depth = 0,
     orderedProjectThreadKeys,
     isActive,
     openPullRequestsInRightPanel,
@@ -504,7 +507,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const prStatus = prStatusIndicator(pr, linkedPullRequestStatus?.sourceControlProvider);
   const terminalStatus = terminalStatusFromRunningIds(runningTerminalIds);
   const isSettled = thread.settledOverride === "settled";
-  const canSettle = canOperateThread && readEnvironmentSupportsSettlement(thread.environmentId);
+  const canSettle =
+    depth === 0 && canOperateThread && readEnvironmentSupportsSettlement(thread.environmentId);
   // Hover/focus reveal the row's action buttons (always shown on the active row)
   // and fade the timestamp they replace.
   const threadMetaClassName = isActive
@@ -706,6 +710,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               : "text-sidebar-muted-foreground/80 hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
           isFileDragOver && "ring-1 ring-inset ring-primary/70",
         )}
+        style={depth > 0 ? { paddingLeft: `${0.5 + depth * 0.75}rem` } : undefined}
         onClick={handleRowClick}
         onDoubleClick={handleRowDoubleClick}
         onKeyDown={handleRowKeyDown}
@@ -948,6 +953,10 @@ interface SidebarProjectThreadListProps {
   orderedProjectThreadKeys: readonly string[];
   renderedThreads: readonly SidebarThreadSummary[];
   settledThreads: readonly SidebarThreadSummary[];
+  /** Subagent children by `${environmentId}:${parentThreadId}`. */
+  childrenByParentKey: ReadonlyMap<string, readonly SidebarThreadSummary[]>;
+  /** Thread keys that are still working; finished subagents fold behind a toggle. */
+  runningThreadKeys: ReadonlySet<string>;
   isSettledExpanded: boolean;
   toggleSettledThreads: () => void;
   showEmptyThreadState: boolean;
@@ -1003,6 +1012,8 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     orderedProjectThreadKeys,
     renderedThreads,
     settledThreads,
+    childrenByParentKey,
+    runningThreadKeys,
     isSettledExpanded,
     toggleSettledThreads,
     showEmptyThreadState,
@@ -1035,33 +1046,90 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
   const showLessButtonRender = useMemo(() => <button type="button" />, []);
   const settledToggleButtonRender = useMemo(() => <button type="button" />, []);
 
-  const renderThreadRow = (thread: SidebarThreadSummary) => {
+  const [expandedSubagentParents, setExpandedSubagentParents] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const toggleSubagents = useCallback((parentKey: string) => {
+    setExpandedSubagentParents((current) => {
+      const next = new Set(current);
+      if (!next.delete(parentKey)) next.add(parentKey);
+      return next;
+    });
+  }, []);
+  const subtreeHasActiveThread = (parentKey: string): boolean =>
+    (childrenByParentKey.get(parentKey) ?? []).some((child) => {
+      const childKey = scopedThreadKey(scopeThreadRef(child.environmentId, child.id));
+      return childKey === activeRouteThreadKey || subtreeHasActiveThread(childKey);
+    });
+  const subagentToggleButtonRender = useMemo(() => <button type="button" />, []);
+
+  const renderThreadRow = (thread: SidebarThreadSummary, depth = 0): React.ReactNode => {
     const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+    const children = childrenByParentKey.get(threadKey) ?? [];
+    const finishedChildren = children.filter(
+      (child) =>
+        !runningThreadKeys.has(scopedThreadKey(scopeThreadRef(child.environmentId, child.id))),
+    );
+    const finishedExpanded =
+      expandedSubagentParents.has(threadKey) || subtreeHasActiveThread(threadKey);
+    const shownChildren = finishedExpanded
+      ? children
+      : children.filter((child) =>
+          runningThreadKeys.has(scopedThreadKey(scopeThreadRef(child.environmentId, child.id))),
+        );
     return (
-      <SidebarThreadRow
-        key={threadKey}
-        thread={thread}
-        orderedProjectThreadKeys={orderedProjectThreadKeys}
-        isActive={activeRouteThreadKey === threadKey}
-        openPullRequestsInRightPanel={openPullRequestsInRightPanel}
-        jumpLabel={threadJumpLabelByKey.get(threadKey) ?? null}
-        renamingThreadKey={renamingThreadKey}
-        renamingTitle={renamingTitle}
-        setRenamingTitle={setRenamingTitle}
-        startThreadRename={startThreadRename}
-        renamingInputRef={renamingInputRef}
-        renamingCommittedRef={renamingCommittedRef}
-        handleThreadClick={handleThreadClick}
-        navigateToThread={navigateToThread}
-        onFileDropThreads={onFileDropThreads}
-        handleMultiSelectContextMenu={handleMultiSelectContextMenu}
-        handleThreadContextMenu={handleThreadContextMenu}
-        clearSelection={clearSelection}
-        commitRename={commitRename}
-        cancelRename={cancelRename}
-        attemptSettleThread={attemptSettleThread}
-        openPrLink={openPrLink}
-      />
+      <Fragment key={threadKey}>
+        <SidebarThreadRow
+          thread={thread}
+          depth={depth}
+          orderedProjectThreadKeys={orderedProjectThreadKeys}
+          isActive={activeRouteThreadKey === threadKey}
+          openPullRequestsInRightPanel={openPullRequestsInRightPanel}
+          jumpLabel={threadJumpLabelByKey.get(threadKey) ?? null}
+          renamingThreadKey={renamingThreadKey}
+          renamingTitle={renamingTitle}
+          setRenamingTitle={setRenamingTitle}
+          startThreadRename={startThreadRename}
+          renamingInputRef={renamingInputRef}
+          renamingCommittedRef={renamingCommittedRef}
+          handleThreadClick={handleThreadClick}
+          navigateToThread={navigateToThread}
+          onFileDropThreads={onFileDropThreads}
+          handleMultiSelectContextMenu={handleMultiSelectContextMenu}
+          handleThreadContextMenu={handleThreadContextMenu}
+          clearSelection={clearSelection}
+          commitRename={commitRename}
+          cancelRename={cancelRename}
+          attemptSettleThread={attemptSettleThread}
+          openPrLink={openPrLink}
+        />
+        {finishedChildren.length > 0 ? (
+          <SidebarMenuSubItem className="w-full">
+            <SidebarMenuSubButton
+              render={subagentToggleButtonRender}
+              data-thread-selection-safe
+              size="sm"
+              aria-expanded={finishedExpanded}
+              style={{ paddingLeft: `${0.5 + (depth + 1) * 0.75}rem` }}
+              onClick={() => toggleSubagents(threadKey)}
+            >
+              <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                <ChevronRightIcon
+                  className={cn(
+                    "size-3 shrink-0 text-sidebar-muted-foreground",
+                    finishedExpanded && "rotate-90",
+                  )}
+                />
+                <span>
+                  {finishedChildren.length}{" "}
+                  {finishedChildren.length === 1 ? "subagent" : "subagents"}
+                </span>
+              </span>
+            </SidebarMenuSubButton>
+          </SidebarMenuSubItem>
+        ) : null}
+        {shownChildren.map((child) => renderThreadRow(child, depth + 1))}
+      </Fragment>
     );
   };
 
@@ -1080,7 +1148,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
           </div>
         </SidebarMenuSubItem>
       ) : null}
-      {shouldShowThreadPanel && renderedThreads.map(renderThreadRow)}
+      {shouldShowThreadPanel && renderedThreads.map((thread) => renderThreadRow(thread))}
 
       {projectExpanded && hasOverflowingThreads && !isThreadListExpanded && (
         <SidebarMenuSubItem className="w-full">
@@ -1134,7 +1202,9 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
           </SidebarMenuSubButton>
         </SidebarMenuSubItem>
       )}
-      {projectExpanded && isSettledExpanded && settledThreads.map(renderThreadRow)}
+      {projectExpanded &&
+        isSettledExpanded &&
+        settledThreads.map((thread) => renderThreadRow(thread))}
     </SidebarMenuSub>
   );
 });
@@ -1341,6 +1411,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     activeProjectThreads,
     settledProjectThreads,
     orderedProjectThreadKeys,
+    childrenByParentKey,
+    runningThreadKeys,
   } = useMemo(() => {
     const lastVisitedAtByThreadKey = new Map(
       projectThreads.map((thread, index) => [
@@ -1366,9 +1438,23 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     const projectStatus = resolveProjectStatusIndicator(
       visibleProjectThreads.map((thread) => resolveProjectThreadStatus(thread)),
     );
+    // Subagents hang under their parent: only the roots are rows of their own, so they
+    // neither count toward the preview nor settle on their own.
+    const { roots, childrenByParentKey } = buildSubagentTree(visibleProjectThreads);
     const { active: activeProjectThreads, settled: settledProjectThreads } =
-      partitionSettledThreads(visibleProjectThreads);
+      partitionSettledThreads(roots);
+    const runningThreadKeys = new Set<string>();
+    for (const children of childrenByParentKey.values()) {
+      for (const child of children) {
+        const label = resolveProjectThreadStatus(child)?.label;
+        if (label !== undefined && label !== "Completed" && label !== "Plan Ready") {
+          runningThreadKeys.add(scopedThreadKey(scopeThreadRef(child.environmentId, child.id)));
+        }
+      }
+    }
     return {
+      childrenByParentKey,
+      runningThreadKeys,
       // Display order: the active list, then the Settled group below it.
       orderedProjectThreadKeys: [...activeProjectThreads, ...settledProjectThreads].map((thread) =>
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
@@ -2459,6 +2545,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         orderedProjectThreadKeys={orderedProjectThreadKeys}
         renderedThreads={renderedThreads}
         settledThreads={settledProjectThreads}
+        childrenByParentKey={childrenByParentKey}
+        runningThreadKeys={runningThreadKeys}
         isSettledExpanded={isSettledExpanded}
         toggleSettledThreads={toggleSettledThreads}
         showEmptyThreadState={showEmptyThreadState}
@@ -3469,7 +3557,9 @@ export default function LegacySidebar() {
           return [];
         }
         // Settled threads sit in a collapsed group, so they get no jump slots.
-        const activeThreads = partitionSettledThreads(projectThreads).active;
+        const activeThreads = partitionSettledThreads(
+          buildSubagentTree(projectThreads).roots,
+        ).active;
         const isThreadListExpanded = expandedThreadListsByProject.has(project.projectKey);
         const hasOverflowingThreads = activeThreads.length > sidebarThreadPreviewCount;
         const previewThreads =

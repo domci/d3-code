@@ -246,7 +246,7 @@ import {
   RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY,
   type ThreadPanelPresentation,
 } from "../rightPanelLayout";
-import { PopoverCreateHandle } from "./ui/popover";
+import { Popover, PopoverCreateHandle, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import {
   pullRequestSurface,
   selectActiveRightPanel,
@@ -7536,30 +7536,56 @@ export default function ChatView(props: ChatViewProps) {
           aria-hidden="true"
         />
       ),
-      title: presentation.title,
-      // A single named item is already in the title.
-      description:
-        presentation.items.length === 1 && presentation.items[0]?.childThreadId === undefined
-          ? undefined
-          : presentation.items.map((item, index) => {
-              const childThreadId = item.childThreadId;
-              return (
-                <Fragment key={item.taskId}>
-                  {index > 0 ? ", " : null}
-                  {childThreadId === undefined ? (
-                    item.label
-                  ) : (
-                    <InlineButton
-                      tone="muted"
-                      aria-label={`Open subagent ${item.label}`}
-                      onClick={() => onOpenRelatedThread(childThreadId)}
-                    >
-                      {item.label}
-                    </InlineButton>
-                  )}
-                </Fragment>
-              );
-            }),
+      // Subagents with a thread open it. Command and monitor tasks have no
+      // addressable timeline item, so they stay plain text.
+      title:
+        presentation.items.length > 1 ? (
+          <Popover>
+            <PopoverTrigger
+              render={
+                <InlineButton tone="muted" aria-label={`${presentation.title}, show tasks`} />
+              }
+            >
+              {presentation.title}
+            </PopoverTrigger>
+            <PopoverPopup
+              aria-label="Background tasks"
+              side="top"
+              className="max-w-[min(30rem,calc(100vw-2rem))]"
+            >
+              <ul className="flex flex-col gap-1 text-sm">
+                {presentation.items.map((item) => {
+                  const childThreadId = item.childThreadId;
+                  return (
+                    <li key={item.taskId} className="min-w-0">
+                      {childThreadId === undefined ? (
+                        <span className="block truncate text-muted-foreground">{item.label}</span>
+                      ) : (
+                        <InlineButton
+                          tone="muted"
+                          aria-label={`Open subagent ${item.label}`}
+                          onClick={() => onOpenRelatedThread(childThreadId)}
+                        >
+                          {item.label}
+                        </InlineButton>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </PopoverPopup>
+          </Popover>
+        ) : presentation.items[0]?.childThreadId !== undefined ? (
+          <InlineButton
+            tone="muted"
+            aria-label={`Open subagent ${presentation.items[0].label}`}
+            onClick={() => onOpenRelatedThread(presentation.items[0]!.childThreadId!)}
+          >
+            {presentation.title}
+          </InlineButton>
+        ) : (
+          presentation.title
+        ),
       actions: (
         <Button
           size="xs"
