@@ -710,7 +710,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               : "text-sidebar-muted-foreground/80 hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
           isFileDragOver && "ring-1 ring-inset ring-primary/70",
         )}
-        style={depth > 0 ? { paddingLeft: `${0.5 + depth * 0.75}rem` } : undefined}
+        style={depth > 0 ? { paddingLeft: `${0.5 + depth * 1.25}rem` } : undefined}
         onClick={handleRowClick}
         onDoubleClick={handleRowDoubleClick}
         onKeyDown={handleRowKeyDown}
@@ -1074,11 +1074,9 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     );
     const finishedExpanded =
       expandedSubagentParents.has(threadKey) || subtreeHasActiveThread(threadKey);
-    const shownChildren = finishedExpanded
-      ? children
-      : children.filter((child) =>
-          runningThreadKeys.has(scopedThreadKey(scopeThreadRef(child.environmentId, child.id))),
-        );
+    const runningChildren = children.filter((child) =>
+      runningThreadKeys.has(scopedThreadKey(scopeThreadRef(child.environmentId, child.id))),
+    );
     return (
       <Fragment key={threadKey}>
         <SidebarThreadRow
@@ -1105,6 +1103,8 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
           attemptSettleThread={attemptSettleThread}
           openPrLink={openPrLink}
         />
+        {/* Running subagents sit directly under their parent; finished ones fold below them. */}
+        {runningChildren.map((child) => renderThreadRow(child, depth + 1))}
         {finishedChildren.length > 0 ? (
           <SidebarMenuSubItem className="w-full">
             <SidebarMenuSubButton
@@ -1112,7 +1112,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
               data-thread-selection-safe
               size="sm"
               aria-expanded={finishedExpanded}
-              style={{ paddingLeft: `${0.5 + (depth + 1) * 0.75}rem` }}
+              style={{ paddingLeft: `${0.5 + (depth + 1) * 1.25}rem` }}
               onClick={() => toggleSubagents(threadKey)}
             >
               <span className="flex min-w-0 flex-1 items-center gap-1.5">
@@ -1123,14 +1123,16 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
                   )}
                 />
                 <span>
-                  {finishedChildren.length}{" "}
+                  {finishedChildren.length} finished{" "}
                   {finishedChildren.length === 1 ? "subagent" : "subagents"}
                 </span>
               </span>
             </SidebarMenuSubButton>
           </SidebarMenuSubItem>
         ) : null}
-        {shownChildren.map((child) => renderThreadRow(child, depth + 1))}
+        {finishedExpanded
+          ? finishedChildren.map((child) => renderThreadRow(child, depth + 1))
+          : null}
       </Fragment>
     );
   };
