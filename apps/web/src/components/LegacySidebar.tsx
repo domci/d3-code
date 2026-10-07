@@ -756,7 +756,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               <PullRequestGlyph.pullRequest className="size-3" />
             </a>
           ) : null}
-          {threadStatus && <ThreadStatusLabel status={threadStatus} compact />}
           {canOperateThread && renamingThreadKey === threadKey ? (
             <input
               ref={handleRenameInputRef}
@@ -846,7 +845,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             }`}
           >
             <div
-              className={`absolute top-1/2 right-0.5 flex -translate-y-1/2 items-center ${actionsClassName}`}
+              className={`absolute top-1/2 flex -translate-y-1/2 items-center ${
+                threadStatus ? "right-5" : "right-0.5"
+              } ${actionsClassName}`}
             >
               <Tooltip>
                 <TooltipTrigger
@@ -939,6 +940,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               </span>
             </span>
           </div>
+          {threadStatus && <ThreadStatusLabel status={threadStatus} compact />}
         </div>
       </div>
     </SidebarMenuSubItem>
