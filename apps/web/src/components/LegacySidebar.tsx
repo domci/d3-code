@@ -1256,8 +1256,14 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     } = groupThreadChildren(childrenByParentKey.get(threadKey) ?? [], (child) =>
       runningThreadKeys.has(scopedThreadKey(scopeThreadRef(child.environmentId, child.id))),
     );
+    // Forced open only while the open thread is one of the folded subagents (or below one);
+    // forks and running subagents are visible anyway and must not pin the group open.
     const finishedExpanded =
-      expandedSubagentParents.has(threadKey) || subtreeHasActiveThread(threadKey);
+      expandedSubagentParents.has(threadKey) ||
+      finishedChildren.some((child) => {
+        const childKey = scopedThreadKey(scopeThreadRef(child.environmentId, child.id));
+        return childKey === activeRouteThreadKey || subtreeHasActiveThread(childKey);
+      });
     const rowProps = {
       thread,
       depth,
