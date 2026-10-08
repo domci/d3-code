@@ -22,7 +22,10 @@ export function partitionSettledThreads<T extends Pick<SidebarThreadSummary, "se
 /** Deepest level of subagent nesting the tree sidebar indents; deeper ones list beside it. */
 export const MAX_SUBAGENT_TREE_DEPTH = 3;
 
-type SubagentTreeThread = Pick<SidebarThreadSummary, "id" | "environmentId" | "lineage">;
+type SubagentTreeThread = Pick<
+  SidebarThreadSummary,
+  "id" | "environmentId" | "lineage" | "settledOverride"
+>;
 
 const subagentTreeKey = (thread: Pick<SidebarThreadSummary, "id" | "environmentId">) =>
   `${thread.environmentId}:${thread.id}`;
@@ -30,7 +33,9 @@ const subagentTreeKey = (thread: Pick<SidebarThreadSummary, "id" | "environmentI
 /**
  * Attaches subagent threads under their parent. `roots` are the non-subagent threads in the
  * incoming order; `childrenByParentKey` maps `${environmentId}:${threadId}` to that thread's
- * subagent children in incoming order. Subagents whose parent is not in `threads` are dropped.
+ * children in incoming order. Subagents whose parent is not in `threads` are dropped.
+ * A fork nests under its source the same way, but only when the source is in `threads` and on
+ * the same side of the active/settled split; otherwise it stays a root (shown with a fork mark).
  * Nesting beyond `maxDepth` levels is listed beside the deepest level instead of going deeper.
  */
 export function buildSubagentTree<T extends SubagentTreeThread>(
@@ -39,14 +44,26 @@ export function buildSubagentTree<T extends SubagentTreeThread>(
 ): { readonly roots: T[]; readonly childrenByParentKey: ReadonlyMap<string, readonly T[]> } {
   const roots: T[] = [];
   const rawChildren = new Map<string, T[]>();
+  const byKey = new Map(threads.map((thread) => [subagentTreeKey(thread), thread]));
   for (const thread of threads) {
-    if (thread.lineage.relationshipToParent !== "subagent") {
+    const relationship = thread.lineage.relationshipToParent;
+    const parentId = thread.lineage.parentThreadId;
+    const parentKey = `${thread.environmentId}:${parentId}`;
+    if (relationship === "fork") {
+      const source = parentId === null || parentId === undefined ? undefined : byKey.get(parentKey);
+      if (
+        !source ||
+        (source.settledOverride === "settled") !== (thread.settledOverride === "settled")
+      ) {
+        roots.push(thread);
+        continue;
+      }
+    } else if (relationship === "subagent") {
+      if (parentId === null || parentId === undefined) continue;
+    } else {
       roots.push(thread);
       continue;
     }
-    const parentId = thread.lineage.parentThreadId;
-    if (parentId === null || parentId === undefined) continue;
-    const parentKey = `${thread.environmentId}:${parentId}`;
     const siblings = rawChildren.get(parentKey);
     if (siblings) siblings.push(thread);
     else rawChildren.set(parentKey, [thread]);
@@ -67,6 +84,24 @@ export function buildSubagentTree<T extends SubagentTreeThread>(
     visit(key, 0, key);
   }
   return { roots, childrenByParentKey };
+}
+
+/**
+ * Splits one parent's children into the render groups, in display order: running subagents,
+ * forks (oldest first; always visible, never counted as subagents), finished subagents.
+ */
+export function groupThreadChildren<T extends SubagentTreeThread & { readonly createdAt: string }>(
+  children: readonly T[],
+  isRunning: (child: T) => boolean,
+): { readonly running: T[]; readonly forks: T[]; readonly finished: T[] } {
+  const isFork = (child: T) => child.lineage.relationshipToParent === "fork";
+  return {
+    running: children.filter((child) => !isFork(child) && isRunning(child)),
+    forks: children
+      .filter(isFork)
+      .toSorted((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt)),
+    finished: children.filter((child) => !isFork(child) && !isRunning(child)),
+  };
 }
 
 /** Tooltip for a parent row's subagent expander, e.g. "2 working · 3 finished". */

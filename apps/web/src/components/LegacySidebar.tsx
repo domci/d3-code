@@ -4,6 +4,7 @@ import { Spinner } from "~/components/ui/spinner";
 import {
   ArrowUpDownIcon,
   ChevronRightIcon,
+  GitForkIcon,
   CircleCheckIcon,
   EllipsisIcon,
   FolderGit2Icon,
@@ -135,6 +136,7 @@ import { useThreadActionMenu } from "../hooks/useThreadActionMenu";
 import {
   buildProjectThreadOrder,
   describeSubagentCounts,
+  groupThreadChildren,
   planActiveThreadMove,
   sortProjectsByCreation,
 } from "./LegacySidebar.logic";
@@ -347,6 +349,8 @@ interface SidebarThreadRowProps {
   subagentFinished?: number;
   finishedSubagentsExpanded?: boolean;
   onToggleSubagents?: (threadKey: string) => void;
+  /** Set for a fork; `sourceTitle` is null when the source is not in the project's list. */
+  fork?: { readonly sourceTitle: string | null };
   /** Subagent nesting level; children are indented and cannot be settled on their own. */
   depth?: number;
   orderedProjectThreadKeys: readonly string[];
@@ -403,6 +407,7 @@ function checkTaskPermission(environmentId: EnvironmentId): boolean {
 const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowProps) {
   const {
     depth = 0,
+    fork,
     subagentRunning = 0,
     subagentFinished = 0,
     finishedSubagentsExpanded = false,
@@ -778,6 +783,25 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         onContextMenu={handleRowContextMenu}
       >
         <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
+          {fork ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span
+                    data-testid={`thread-fork-${thread.id}`}
+                    className="inline-flex shrink-0 items-center text-sidebar-muted-foreground"
+                  />
+                }
+              >
+                <GitForkIcon className="size-3" />
+              </TooltipTrigger>
+              <TooltipPopup side="top">
+                {fork.sourceTitle === null
+                  ? "Fork of a session that is no longer listed"
+                  : `Fork of ${fork.sourceTitle}`}
+              </TooltipPopup>
+            </Tooltip>
+          ) : null}
           {subagentRunning + subagentFinished > 0 ? (
             <Tooltip>
               <TooltipTrigger
@@ -1092,6 +1116,8 @@ interface SidebarProjectThreadListProps {
   settledThreads: readonly SidebarThreadSummary[];
   /** Subagent children by `${environmentId}:${parentThreadId}`. */
   childrenByParentKey: ReadonlyMap<string, readonly SidebarThreadSummary[]>;
+  /** Titles of the project's listed threads by key, for the fork tooltip. */
+  threadTitleByKey: ReadonlyMap<string, string>;
   /** Thread keys that are still working; finished subagents fold behind a toggle. */
   runningThreadKeys: ReadonlySet<string>;
   isSettledExpanded: boolean;
@@ -1152,6 +1178,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     renderedThreads,
     settledThreads,
     childrenByParentKey,
+    threadTitleByKey,
     runningThreadKeys,
     isSettledExpanded,
     toggleSettledThreads,
@@ -1222,19 +1249,27 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     sortable = false,
   ): React.ReactNode => {
     const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
-    const children = childrenByParentKey.get(threadKey) ?? [];
-    const finishedChildren = children.filter(
-      (child) =>
-        !runningThreadKeys.has(scopedThreadKey(scopeThreadRef(child.environmentId, child.id))),
+    const {
+      running: runningChildren,
+      forks: forkChildren,
+      finished: finishedChildren,
+    } = groupThreadChildren(childrenByParentKey.get(threadKey) ?? [], (child) =>
+      runningThreadKeys.has(scopedThreadKey(scopeThreadRef(child.environmentId, child.id))),
     );
     const finishedExpanded =
       expandedSubagentParents.has(threadKey) || subtreeHasActiveThread(threadKey);
-    const runningChildren = children.filter((child) =>
-      runningThreadKeys.has(scopedThreadKey(scopeThreadRef(child.environmentId, child.id))),
-    );
     const rowProps = {
       thread,
       depth,
+      ...(thread.lineage.relationshipToParent === "fork"
+        ? {
+            fork: {
+              sourceTitle:
+                threadTitleByKey.get(`${thread.environmentId}:${thread.lineage.parentThreadId}`) ??
+                null,
+            },
+          }
+        : {}),
       subagentRunning: runningChildren.length,
       subagentFinished: finishedChildren.length,
       finishedSubagentsExpanded: finishedExpanded,
@@ -1267,8 +1302,10 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
         ) : (
           <SidebarThreadRow {...rowProps} />
         )}
-        {/* Running subagents sit directly under their parent; finished ones fold below them. */}
+        {/* Running subagents sit directly under their parent, then forks (full sessions, always
+            shown); finished subagents fold below them. */}
         {runningChildren.map((child) => renderThreadRow(child, depth + 1))}
+        {forkChildren.map((child) => renderThreadRow(child, depth + 1))}
         {finishedExpanded
           ? finishedChildren.map((child) => renderThreadRow(child, depth + 1))
           : null}
@@ -1570,6 +1607,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
   const {
     projectStatus,
+    threadTitleByKey,
     visibleProjectThreads,
     activeProjectThreads,
     settledProjectThreads,
@@ -1601,8 +1639,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         .filter((thread) => thread.settledOverride !== "settled")
         .map((thread) => resolveProjectThreadStatus(thread)),
     );
-    // Subagents hang under their parent: only the roots are rows of their own, so they
-    // neither count toward the preview nor settle on their own.
+    // Subagents and nested forks hang under their parent: only the roots are rows of their own,
+    // so they neither count toward the preview nor get jump slots; subagents cannot settle on
+    // their own. A fork whose source is not on its side of the split is a root and counts.
     const {
       childrenByParentKey,
       active: activeProjectThreads,
@@ -1617,8 +1656,15 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         }
       }
     }
+    const threadTitleByKey = new Map(
+      visibleProjectThreads.map((thread) => [
+        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+        thread.title,
+      ]),
+    );
     return {
       childrenByParentKey,
+      threadTitleByKey,
       runningThreadKeys,
       // Display order: the active list, then the Settled group below it.
       orderedProjectThreadKeys: [...activeProjectThreads, ...settledProjectThreads].map((thread) =>
@@ -2712,6 +2758,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         renderedThreads={renderedThreads}
         settledThreads={settledProjectThreads}
         childrenByParentKey={childrenByParentKey}
+        threadTitleByKey={threadTitleByKey}
         runningThreadKeys={runningThreadKeys}
         isSettledExpanded={isSettledExpanded}
         toggleSettledThreads={toggleSettledThreads}

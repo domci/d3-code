@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   buildProjectThreadOrder,
   buildSubagentTree,
+  groupThreadChildren,
   describeSubagentCounts,
   partitionSettledThreads,
   planActiveThreadMove,
@@ -26,15 +27,24 @@ describe("partitionSettledThreads", () => {
 });
 
 describe("buildSubagentTree", () => {
-  const thread = (id: string, parent: string | null = null, env = "e") =>
+  const thread = (
+    id: string,
+    parent: string | null = null,
+    env = "e",
+    kind: "subagent" | "fork" = "subagent",
+    settled = false,
+  ) =>
     ({
       id,
       environmentId: env,
+      settledOverride: settled ? "settled" : null,
       lineage: {
-        relationshipToParent: parent === null ? null : "subagent",
+        relationshipToParent: parent === null ? null : kind,
         parentThreadId: parent,
       },
     }) as never as Parameters<typeof buildSubagentTree>[0][number];
+  const fork = (id: string, parent: string, settled = false) =>
+    thread(id, parent, "e", "fork", settled);
   const ids = (list: readonly { id: string }[] | undefined) => (list ?? []).map((t) => t.id);
 
   it("keeps subagents out of the roots and groups them under their parent in order", () => {
@@ -68,6 +78,43 @@ describe("buildSubagentTree", () => {
     expect(childrenByParentKey.size).toBe(0);
   });
 
+  it("nests a fork under an active source and keeps it out of the roots", () => {
+    const { roots, childrenByParentKey } = buildSubagentTree([
+      thread("a"),
+      fork("f", "a"),
+      thread("a1", "a"),
+    ]);
+    expect(ids(roots)).toEqual(["a"]);
+    expect(ids(childrenByParentKey.get("e:a"))).toEqual(["f", "a1"]);
+  });
+
+  it("shows a fork at top level when its source is on the other side of the settle split", () => {
+    const { roots, childrenByParentKey } = buildSubagentTree([
+      thread("a", null, "e", "subagent", true),
+      fork("f", "a"),
+      thread("b"),
+      fork("g", "b", true),
+    ]);
+    expect(ids(roots)).toEqual(["a", "f", "b", "g"]);
+    expect(childrenByParentKey.size).toBe(0);
+  });
+
+  it("nests forks of forks and nests a settled fork under a settled source", () => {
+    const { roots, childrenByParentKey } = buildSubagentTree([
+      thread("a", null, "e", "subagent", true),
+      fork("f", "a", true),
+      fork("g", "f", true),
+    ]);
+    expect(ids(roots)).toEqual(["a"]);
+    expect(ids(childrenByParentKey.get("e:a"))).toEqual(["f"]);
+    expect(ids(childrenByParentKey.get("e:f"))).toEqual(["g"]);
+  });
+
+  it("keeps a fork with a missing source as a root, unlike a subagent", () => {
+    const { roots } = buildSubagentTree([fork("f", "gone"), thread("s", "gone")]);
+    expect(ids(roots)).toEqual(["f"]);
+  });
+
   it("nests recursively and lists levels past the depth cap beside the deepest level", () => {
     const threads = [
       thread("a"),
@@ -80,6 +127,32 @@ describe("buildSubagentTree", () => {
     expect(ids(childrenByParentKey.get("e:a"))).toEqual(["b"]);
     expect(ids(childrenByParentKey.get("e:b"))).toEqual(["c", "d", "e"]);
     expect(childrenByParentKey.has("e:c")).toBe(false);
+  });
+});
+
+describe("groupThreadChildren", () => {
+  const child = (id: string, relationship: string, createdAt: string) =>
+    ({
+      id,
+      environmentId: "e",
+      createdAt,
+      settledOverride: null,
+      lineage: { relationshipToParent: relationship, parentThreadId: "p" },
+    }) as never as Parameters<typeof groupThreadChildren>[0][number];
+
+  it("orders running subagents, forks oldest first, then finished; forks never count as subagents", () => {
+    const { running, forks, finished } = groupThreadChildren(
+      [
+        child("done", "subagent", "2026-01-01"),
+        child("f2", "fork", "2026-03-01"),
+        child("busy", "subagent", "2026-01-02"),
+        child("f1", "fork", "2026-02-01"),
+      ],
+      (c) => c.id === "busy" || c.id === "f2",
+    );
+    expect(running.map((c) => c.id)).toEqual(["busy"]);
+    expect(forks.map((c) => c.id)).toEqual(["f1", "f2"]);
+    expect(finished.map((c) => c.id)).toEqual(["done"]);
   });
 });
 
