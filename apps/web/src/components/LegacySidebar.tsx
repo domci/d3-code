@@ -1595,8 +1595,11 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       });
     };
     const visibleProjectThreads = projectThreads.filter((thread) => thread.archivedAt === null);
+    // Settled threads are put away, so they do not light up their collapsed project.
     const projectStatus = resolveProjectStatusIndicator(
-      visibleProjectThreads.map((thread) => resolveProjectThreadStatus(thread)),
+      visibleProjectThreads
+        .filter((thread) => thread.settledOverride !== "settled")
+        .map((thread) => resolveProjectThreadStatus(thread)),
     );
     // Subagents hang under their parent: only the roots are rows of their own, so they
     // neither count toward the preview nor settle on their own.
