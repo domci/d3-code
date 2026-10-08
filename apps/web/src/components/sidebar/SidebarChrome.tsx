@@ -89,7 +89,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
 
 /** Always-visible light/dark switch in the sidebar titlebar. */
 function ThemeToggle() {
-  const { resolvedTheme, setTheme } = useTheme();
+  const { resolvedTheme, setAppearanceMode } = useTheme();
   const next = resolvedTheme === "dark" ? "light" : "dark";
   return (
     <Tooltip>
@@ -100,7 +100,7 @@ function ThemeToggle() {
             size="icon-xs"
             variant="ghost"
             aria-label={`Switch to ${next} mode`}
-            onClick={() => setTheme(next)}
+            onClick={() => setAppearanceMode(next)}
           />
         }
       >
