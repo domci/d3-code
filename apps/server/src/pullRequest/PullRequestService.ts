@@ -1,3 +1,4 @@
+import type { MergeCommitChecks } from "./mergeCommitChecks.ts";
 import {
   canonicalRepositoryKey,
   isSshRemoteUrl,
@@ -150,6 +151,9 @@ const detailTimeToLive = (state: PullRequestState | undefined) =>
  * page and a watched pull request's change reaches its watch.
  */
 const CHECKS_CACHE_TTL = Duration.seconds(15);
+/** Post-merge checks are read by a minutely sweep, so a minute is the freshest worth keeping. */
+const MERGE_COMMIT_CHECKS_CACHE_TTL = Duration.seconds(55);
+const MERGE_COMMIT_FINISHED_CHECKS_CACHE_TTL = Duration.minutes(10);
 const DIFF_CACHE_TTL = Duration.seconds(60);
 /** A commit is content-addressed, so its own diff cannot change under its key. */
 const COMMIT_DIFF_CACHE_TTL = Duration.minutes(10);
@@ -234,6 +238,13 @@ export class PullRequestService extends Context.Service<
     readonly checks: (
       input: PullRequestRef,
     ) => Effect.Effect<PullRequestChecks | null, PullRequestError>;
+    /**
+     * The check runs on a merged pull request's merge commit, or null where the host has none to
+     * read. A background read: it keeps to the rate-limit budget and never takes the reserve.
+     */
+    readonly mergeCommitChecks: (
+      input: PullRequestRef,
+    ) => Effect.Effect<MergeCommitChecks | null, PullRequestError>;
     /**
      * What a pull request watch compares between passes, so it reads detail and activity only
      * when something moved. Null when the host has no fingerprint or gave none for this one.
@@ -596,6 +607,9 @@ function withRateLimitBackoff(
     ...(api.getChangeRequestChecks === undefined
       ? {}
       : { getChangeRequestChecks: wrap("getChangeRequestChecks", api.getChangeRequestChecks) }),
+    ...(api.getMergeCommitChecks === undefined
+      ? {}
+      : { getMergeCommitChecks: wrap("getMergeCommitChecks", api.getMergeCommitChecks) }),
     ...(api.getChangeRequestSummary === undefined
       ? {}
       : {
@@ -2980,6 +2994,37 @@ export const make = Effect.gen(function* () {
     },
   );
 
+  const mergeCommitChecksCache = yield* Cache.makeWith(
+    (key: string) => {
+      const input = refOfCacheKey(key);
+      return requireProject(input).pipe(
+        Effect.flatMap((project) =>
+          project.api.getMergeCommitChecks === undefined
+            ? Effect.succeed(null)
+            : project.api
+                .getMergeCommitChecks({
+                  cwd: project.project.workspaceRoot,
+                  repository: project.repository,
+                  host: project.host,
+                  number: input.number,
+                })
+                .pipe(Effect.mapError(toPullRequestError("mergeCommitChecks"))),
+        ),
+      );
+    },
+    {
+      capacity: DETAIL_CACHE_CAPACITY,
+      // A finished answer stays so a failed run is not re-read on every minute's sweep; a run in
+      // flight is looked at again once the sweep comes round.
+      timeToLive: (exit) =>
+        !Exit.isSuccess(exit)
+          ? Duration.zero
+          : exit.value?.state === "failed" || exit.value?.state === "passed"
+            ? MERGE_COMMIT_FINISHED_CHECKS_CACHE_TTL
+            : MERGE_COMMIT_CHECKS_CACHE_TTL,
+    },
+  );
+
   const watchFingerprintCache = yield* Cache.makeWith(
     (key: string) => {
       const input = refOfCacheKey(key);
@@ -3380,6 +3425,9 @@ export const make = Effect.gen(function* () {
     refreshAfterTurn,
     detail: credentialCached(detail),
     checks: credentialCached((input) => Cache.get(checksCache, refCacheKey(input))),
+    mergeCommitChecks: credentialCached((input) =>
+      Cache.get(mergeCommitChecksCache, refCacheKey(input)),
+    ),
     watchFingerprint: credentialCached((input) =>
       Cache.get(watchFingerprintCache, refCacheKey(input)),
     ),

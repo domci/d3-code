@@ -6,7 +6,9 @@ import {
   ChevronRightIcon,
   CircleCheckIcon,
   EllipsisIcon,
+  FolderGit2Icon,
   FolderPlusIcon,
+  GitBranchIcon,
   Globe2Icon,
   SearchIcon,
   SquarePenIcon,
@@ -21,7 +23,6 @@ import {
   terminalStatusFromRunningIds,
   synchronizeTerminalPulse,
   ThreadStatusLabel,
-  ThreadWorktreeIndicator,
   useLinkedThreadPullRequest,
 } from "./ThreadStatusIndicators";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
@@ -130,7 +131,12 @@ import { useDesktopUpdateState } from "../state/desktopUpdate";
 
 import { useThreadActions } from "../hooks/useThreadActions";
 import { useThreadActionMenu } from "../hooks/useThreadActionMenu";
-import { buildSubagentTree, partitionSettledThreads } from "./LegacySidebar.logic";
+import {
+  buildSubagentTree,
+  describeSubagentCounts,
+  partitionSettledThreads,
+} from "./LegacySidebar.logic";
+import { formatWorktreePathForDisplay } from "../worktreeCleanup";
 import { projectEnvironment } from "../state/projects";
 import { threadEnvironment, useEnvironmentThread } from "../state/threads";
 import { useEnvironment, useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
@@ -329,6 +335,11 @@ function buildThreadJumpLabelMap(input: {
 
 interface SidebarThreadRowProps {
   thread: SidebarThreadSummary;
+  /** Subagent children of this thread; the expander shows only when there are any. */
+  subagentRunning?: number;
+  subagentFinished?: number;
+  finishedSubagentsExpanded?: boolean;
+  onToggleSubagents?: (threadKey: string) => void;
   /** Subagent nesting level; children are indented and cannot be settled on their own. */
   depth?: number;
   orderedProjectThreadKeys: readonly string[];
@@ -383,6 +394,10 @@ function checkTaskPermission(environmentId: EnvironmentId): boolean {
 const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowProps) {
   const {
     depth = 0,
+    subagentRunning = 0,
+    subagentFinished = 0,
+    finishedSubagentsExpanded = false,
+    onToggleSubagents,
     orderedProjectThreadKeys,
     isActive,
     openPullRequestsInRightPanel,
@@ -665,11 +680,23 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const handleRenameInputClick = useCallback((event: React.MouseEvent<HTMLInputElement>) => {
     event.stopPropagation();
   }, []);
+  const worktreePath = thread.worktreePath?.trim();
+  const branchTooltip = [thread.branch, worktreePath && formatWorktreePathForDisplay(worktreePath)]
+    .filter(Boolean)
+    .join(" · ");
   const stopPropagationOnPointerDown = useCallback(
     (event: React.PointerEvent<HTMLButtonElement>) => {
       event.stopPropagation();
     },
     [],
+  );
+  const handleSubagentsClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      onToggleSubagents?.(threadKey);
+    },
+    [onToggleSubagents, threadKey],
   );
   const handleMoreClick = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -717,6 +744,34 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         onContextMenu={handleRowContextMenu}
       >
         <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
+          {subagentRunning + subagentFinished > 0 ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    data-thread-selection-safe
+                    data-testid={`thread-subagents-${thread.id}`}
+                    aria-expanded={finishedSubagentsExpanded}
+                    aria-label={`${finishedSubagentsExpanded ? "Hide" : "Show"} finished subagents (${describeSubagentCounts(subagentRunning, subagentFinished)})`}
+                    className="inline-flex shrink-0 cursor-pointer items-center rounded-sm text-sidebar-muted-foreground outline-hidden hover:text-sidebar-foreground focus-visible:ring-1 focus-visible:ring-ring"
+                    onPointerDown={stopPropagationOnPointerDown}
+                    onClick={handleSubagentsClick}
+                  />
+                }
+              >
+                <ChevronRightIcon
+                  className={cn("size-3", finishedSubagentsExpanded && "rotate-90")}
+                />
+                <span className="text-3xs tabular-nums leading-none">
+                  {subagentRunning + subagentFinished}
+                </span>
+              </TooltipTrigger>
+              <TooltipPopup side="top">
+                {describeSubagentCounts(subagentRunning, subagentFinished)}
+              </TooltipPopup>
+            </Tooltip>
+          ) : null}
           {prStatus && pr && (
             <Tooltip>
               <TooltipTrigger
@@ -804,20 +859,31 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               </TooltipPopup>
             </Tooltip>
           )}
-          <ThreadWorktreeIndicator thread={thread} />
-          {thread.branch ? (
+          {worktreePath || thread.branch ? (
             <Tooltip>
               <TooltipTrigger
                 render={
                   <span
-                    className="max-w-24 truncate text-3xs text-muted-foreground/60"
-                    data-testid={`thread-branch-${thread.id}`}
+                    role="img"
+                    tabIndex={0}
+                    aria-label={branchTooltip}
+                    data-testid={
+                      worktreePath ? `thread-worktree-${thread.id}` : `thread-branch-${thread.id}`
+                    }
+                    className="inline-flex items-center justify-center rounded-sm outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                   />
                 }
               >
-                {thread.branch}
+                {worktreePath ? (
+                  <FolderGit2Icon className="size-3 text-muted-foreground/40" />
+                ) : (
+                  <GitBranchIcon className="size-3 text-muted-foreground/40" />
+                )}
               </TooltipTrigger>
-              <TooltipPopup side="top">{thread.branch}</TooltipPopup>
+              <TooltipPopup side="top">
+                {thread.branch ? <div>{thread.branch}</div> : null}
+                {worktreePath ? <div>{formatWorktreePathForDisplay(worktreePath)}</div> : null}
+              </TooltipPopup>
             </Tooltip>
           ) : null}
           {terminalStatus && (
@@ -1063,7 +1129,6 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
       const childKey = scopedThreadKey(scopeThreadRef(child.environmentId, child.id));
       return childKey === activeRouteThreadKey || subtreeHasActiveThread(childKey);
     });
-  const subagentToggleButtonRender = useMemo(() => <button type="button" />, []);
 
   const renderThreadRow = (thread: SidebarThreadSummary, depth = 0): React.ReactNode => {
     const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
@@ -1082,6 +1147,10 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
         <SidebarThreadRow
           thread={thread}
           depth={depth}
+          subagentRunning={runningChildren.length}
+          subagentFinished={finishedChildren.length}
+          finishedSubagentsExpanded={finishedExpanded}
+          onToggleSubagents={toggleSubagents}
           orderedProjectThreadKeys={orderedProjectThreadKeys}
           isActive={activeRouteThreadKey === threadKey}
           openPullRequestsInRightPanel={openPullRequestsInRightPanel}
@@ -1105,31 +1174,6 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
         />
         {/* Running subagents sit directly under their parent; finished ones fold below them. */}
         {runningChildren.map((child) => renderThreadRow(child, depth + 1))}
-        {finishedChildren.length > 0 ? (
-          <SidebarMenuSubItem className="w-full">
-            <SidebarMenuSubButton
-              render={subagentToggleButtonRender}
-              data-thread-selection-safe
-              size="sm"
-              aria-expanded={finishedExpanded}
-              style={{ paddingLeft: `${0.5 + (depth + 1) * 1.25}rem` }}
-              onClick={() => toggleSubagents(threadKey)}
-            >
-              <span className="flex min-w-0 flex-1 items-center gap-1.5">
-                <ChevronRightIcon
-                  className={cn(
-                    "size-3 shrink-0 text-sidebar-muted-foreground",
-                    finishedExpanded && "rotate-90",
-                  )}
-                />
-                <span>
-                  {finishedChildren.length} finished{" "}
-                  {finishedChildren.length === 1 ? "subagent" : "subagents"}
-                </span>
-              </span>
-            </SidebarMenuSubButton>
-          </SidebarMenuSubItem>
-        ) : null}
         {finishedExpanded
           ? finishedChildren.map((child) => renderThreadRow(child, depth + 1))
           : null}

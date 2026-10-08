@@ -811,6 +811,7 @@ export function BranchToolbarBranchSelector({
         {displayMode === "panel" && prNumber !== undefined && prUrl !== undefined ? (
           <ThreadDetailsPrRows
             threadRef={threadRef}
+            composerDraftTarget={draftId ?? threadRef}
             links={serverThread?.pullRequests ?? []}
             currentLink={currentLinkedPr}
             onOpenLink={openPrLink}

@@ -37,6 +37,7 @@ import type {
   PullRequestViewerPermissions,
   SourceControlProviderKind,
 } from "@t3tools/contracts";
+import type { MergeCommitChecks } from "./mergeCommitChecks.ts";
 import { SourceControlProviderKind as SourceControlProviderKindSchema } from "@t3tools/contracts";
 
 /**
@@ -424,6 +425,11 @@ export interface PullRequestProviderApi {
   readonly getChangeRequestChecks?: (
     input: ProviderRepositoryRef & { readonly number: number },
   ) => Effect.Effect<PullRequestChecks, PullRequestProviderError>;
+
+  /** Check runs on a merged change request's merge commit; absent where the host has none. */
+  readonly getMergeCommitChecks?: (
+    input: ProviderRepositoryRef & { readonly number: number },
+  ) => Effect.Effect<MergeCommitChecks | null, PullRequestProviderError>;
 
   readonly getChangeRequest: (
     input: ProviderRepositoryRef & { readonly number: number },

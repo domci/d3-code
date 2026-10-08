@@ -30,6 +30,7 @@ import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 
 import * as GitManager from "../git/GitManager.ts";
+import type { MergeCommitChecks } from "../pullRequest/mergeCommitChecks.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as ServerActivation from "../serverActivation.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -355,6 +356,80 @@ describe("resolveAutoSettlementAt", () => {
       }),
     ).toBeNull();
   });
+  describe("post-merge checks", () => {
+    const merged = (minutesAgo: number) => ({
+      state: "merged" as const,
+      mergedAt: DateTime.formatIso(at(-minutesAgo * 60 * 1_000)),
+    });
+    const settleWith = (minutesAgo: number, checks: MergeCommitChecks | null | undefined) =>
+      ThreadSettlementService.resolveAutoSettlementAt({
+        thread: shell({
+          latestUserMessageAt: at(-3 * DAY_MS),
+          latestRunCompletedAt: at(-2 * DAY_MS),
+        }),
+        pullRequest: merged(minutesAgo),
+        nowMs: NOW_MS,
+        autoSettleAfterDays: null,
+        autoSettleOnMerge: true,
+        ...(checks === undefined ? {} : { postMergeChecks: checks }),
+      });
+
+    it("settles on the merge alone when the checks were not read", () => {
+      expect(settleWith(1, undefined)).not.toBeNull();
+      expect(settleWith(1, null)).not.toBeNull();
+    });
+
+    it("settles once every check passed", () => {
+      expect(settleWith(1, { state: "passed" })).not.toBeNull();
+    });
+
+    it("waits out the grace period when no check registered", () => {
+      const graceMinutes = ThreadSettlementService.POST_MERGE_CHECKS_GRACE_MS / 60_000;
+      expect(settleWith(graceMinutes - 1, { state: "none" })).toBeNull();
+      expect(settleWith(graceMinutes, { state: "none" })).not.toBeNull();
+    });
+
+    it("holds the thread while checks run or after one failed", () => {
+      expect(settleWith(10, { state: "pending" })).toBeNull();
+      expect(settleWith(10, { state: "failed" })).toBeNull();
+    });
+
+    it("stops waiting once the cap after the merge has passed", () => {
+      const capMinutes = ThreadSettlementService.POST_MERGE_CHECKS_MAX_WAIT_MS / 60_000;
+      for (const state of ["pending", "failed", "none"] as const) {
+        expect(settleWith(capMinutes - 1, { state }) === null).toBe(state !== "none");
+        expect(settleWith(capMinutes, { state })).not.toBeNull();
+      }
+    });
+
+    it("never holds a closed pull request or the inactivity rule", () => {
+      const thread = shell({
+        latestUserMessageAt: at(-3 * DAY_MS),
+        latestRunCompletedAt: at(-2 * DAY_MS),
+      });
+      expect(
+        ThreadSettlementService.resolveAutoSettlementAt({
+          thread,
+          pullRequest: { state: "closed", closedAt: DateTime.formatIso(at(-60_000)) },
+          nowMs: NOW_MS,
+          autoSettleAfterDays: null,
+          autoSettleOnMerge: true,
+          postMergeChecks: { state: "failed" },
+        }),
+      ).not.toBeNull();
+      // A failed deploy holds the merge settlement, but a thread idle past its window still settles.
+      expect(
+        ThreadSettlementService.resolveAutoSettlementAt({
+          thread,
+          pullRequest: merged(10),
+          nowMs: NOW_MS,
+          autoSettleAfterDays: 1,
+          autoSettleOnMerge: true,
+          postMergeChecks: { state: "failed" },
+        }),
+      ).toEqual(at(-2 * DAY_MS));
+    });
+  });
 });
 
 const NOW = "2026-08-28T12:00:00.000Z";
@@ -484,6 +559,8 @@ interface HarnessOptions {
   readonly settings?: ContractServerSettings;
   readonly branchPullRequest?: GitManager.GitManager["Service"]["branchPullRequest"];
   readonly pullRequestSummary?: PullRequestService.PullRequestService["Service"]["summary"];
+  /** Post-merge checks of the merge commit; absent means the host has none to read. */
+  readonly mergeCommitChecks?: PullRequestService.PullRequestService["Service"]["mergeCommitChecks"];
   readonly existingWorktreePaths?: ReadonlyArray<string>;
   readonly onDispatch?: (command: AutoSettleCommand) => Effect.Effect<void>;
   /** Threads `getThread` returns when a `thread.settled` event is handled. */
@@ -511,6 +588,7 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
     }>
   >([]);
   const summaryRecovery = yield* Ref.make<ReadonlyArray<boolean | undefined>>([]);
+  const checkCalls = yield* Ref.make<ReadonlyArray<number>>([]);
   const invalidatedCwds = yield* Ref.make<ReadonlyArray<string>>([]);
   const domainEvents = yield* PubSub.unbounded<OrchestrationV2DomainEvent>();
   const closedIdle = yield* Queue.unbounded<{ readonly threadId: string }>();
@@ -547,6 +625,13 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
           )
       );
     });
+
+  const mergeCommitChecks: PullRequestService.PullRequestService["Service"]["mergeCommitChecks"] = (
+    input,
+  ) =>
+    Ref.update(checkCalls, (calls) => [...calls, input.number]).pipe(
+      Effect.andThen(options.mergeCommitChecks?.(input) ?? Effect.succeed(null)),
+    );
 
   const dispatch: Orchestrator.OrchestratorV2Shape["dispatch"] = (command) => {
     if (command.type !== "thread.auto-settle") {
@@ -607,6 +692,7 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
     }),
     Layer.mock(PullRequestService.PullRequestService)({
       summary: pullRequestSummary,
+      mergeCommitChecks,
       subscribeMerges: PubSub.subscribe(mergedPullRequests).pipe(
         Effect.map((subscription) => Stream.fromSubscription(subscription)),
       ),
@@ -629,6 +715,7 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
     branchCalls,
     summaryCalls,
     summaryRecovery,
+    checkCalls,
     invalidatedCwds,
     closedIdle,
     publishEvent: (event: OrchestrationV2DomainEvent) => PubSub.publish(domainEvents, event),
@@ -1003,6 +1090,108 @@ describe("ThreadSettlementServiceV2 worker", () => {
         }).pipe(Effect.provide(fixture.layer));
       }),
     ),
+  );
+});
+
+describe("ThreadSettlementServiceV2 post-merge checks", () => {
+  const mergedThread = makeThread("merged-checks", {
+    pullRequests: [
+      {
+        host: "example.test",
+        repository: "owner/repository",
+        number: 42,
+        url: "https://example.test/owner/repository/pull/42",
+        source: "manual",
+        linkedAt: "2026-08-20T00:00:00.000Z",
+        snapshot: {
+          state: "merged",
+          title: "Pull request",
+          headBranch: "feature",
+          baseBranch: "main",
+          isDraft: false,
+          updatedAt: NOW,
+          syncedAt: NOW,
+          mergedAt: NOW,
+        },
+        stack: null,
+      },
+    ],
+  });
+
+  const run = (
+    mergeCommitChecks: MergeCommitChecks | null,
+    advanceMs: number,
+    options: Partial<HarnessOptions> = {},
+  ) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW) + advanceMs);
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([mergedThread]),
+          settings: { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleAfterDays: null },
+          mergeCommitChecks: () => Effect.succeed(mergeCommitChecks),
+          ...options,
+        });
+        return yield* Effect.gen(function* () {
+          const service = yield* ThreadSettlementService.ThreadSettlementServiceV2;
+          yield* startHarness(service, fixture.activation, fixture.snapshotReads);
+          return {
+            settled: (yield* Ref.get(fixture.commands)).length,
+            checkCalls: yield* Ref.get(fixture.checkCalls),
+          };
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    );
+
+  it.effect("settles once the merge commit's checks passed", () =>
+    Effect.gen(function* () {
+      expect(yield* run({ state: "passed" }, 0)).toEqual({ settled: 1, checkCalls: [42] });
+    }),
+  );
+
+  it.effect("holds a thread whose merge commit checks are running or failed", () =>
+    Effect.gen(function* () {
+      expect(yield* run({ state: "pending" }, 60_000)).toEqual({ settled: 0, checkCalls: [42] });
+      expect(yield* run({ state: "failed" }, 60_000)).toEqual({ settled: 0, checkCalls: [42] });
+    }),
+  );
+
+  it.effect("waits out the grace period for a merge with no checks, then settles", () =>
+    Effect.gen(function* () {
+      expect((yield* run({ state: "none" }, 60_000)).settled).toBe(0);
+      expect((yield* run({ state: "none" }, 6 * 60_000)).settled).toBe(1);
+    }),
+  );
+
+  it.effect("settles as before where the host has no checks to read", () =>
+    Effect.gen(function* () {
+      expect((yield* run(null, 0)).settled).toBe(1);
+    }),
+  );
+
+  it.effect("keeps waiting through a failed read, until the cap", () =>
+    Effect.gen(function* () {
+      const failing = { mergeCommitChecks: () => Effect.die(new Error("rate limited")) };
+      expect((yield* run(null, 60_000, failing)).settled).toBe(0);
+      expect(
+        (yield* run(null, ThreadSettlementService.POST_MERGE_CHECKS_MAX_WAIT_MS + 60_000, failing))
+          .settled,
+      ).toBe(1);
+    }),
+  );
+
+  it.effect("reads nothing when settling on merge is off", () =>
+    Effect.gen(function* () {
+      const result = yield* run({ state: "pending" }, 60_000, {
+        settings: {
+          ...DEFAULT_SERVER_SETTINGS,
+          sidebarAutoSettleOnMerge: false,
+          // Keeps the sweep configured; far enough out that inactivity settles nothing.
+          sidebarAutoSettleAfterDays: 3650,
+        },
+      });
+      expect(result).toEqual({ settled: 0, checkCalls: [] });
+    }),
   );
 });
 

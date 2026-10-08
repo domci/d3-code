@@ -61,3 +61,10 @@ export function buildSubagentTree<T extends SubagentTreeThread>(
   }
   return { roots, childrenByParentKey };
 }
+
+/** Tooltip for a parent row's subagent expander, e.g. "2 working · 3 finished". */
+export function describeSubagentCounts(running: number, finished: number): string {
+  return [running > 0 ? `${running} working` : null, finished > 0 ? `${finished} finished` : null]
+    .filter((part) => part !== null)
+    .join(" · ");
+}

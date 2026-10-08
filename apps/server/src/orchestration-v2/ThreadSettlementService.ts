@@ -3,6 +3,7 @@ import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import {
   CommandId,
+  type PullRequestRef,
   type ThreadId,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ThreadShell,
@@ -20,6 +21,7 @@ import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
 import * as GitManager from "../git/GitManager.ts";
+import type { MergeCommitChecks } from "../pullRequest/mergeCommitChecks.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { forkParked } from "../serverActivation.ts";
@@ -32,9 +34,15 @@ export interface SettlementPullRequest {
   readonly state: "open" | "closed" | "merged";
   readonly closedAt?: string | null;
   readonly mergedAt?: string | null;
+  /** Where to read the merge commit's checks; absent when the pull request cannot be addressed. */
+  readonly ref?: Pick<PullRequestRef, "projectId" | "repository" | "number"> | undefined;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
+/** A merge with no check on its commit this long afterwards has no post-merge workflow to wait for. */
+export const POST_MERGE_CHECKS_GRACE_MS = 5 * 60 * 1_000;
+/** Post-merge checks never hold a thread longer than this after the merge. */
+export const POST_MERGE_CHECKS_MAX_WAIT_MS = DAY_MS;
 export const QUEUED_TURN_START_GRACE_MS = 2 * 60 * 1_000;
 
 function toMillis(value: DateTime.Utc | null | undefined): number | null {
@@ -134,6 +142,17 @@ function pullRequestSettles(
   return pullRequestAtMs >= userAnchorMs;
 }
 
+/** The pull request a GitHub-style URL names, or undefined for any other shape. */
+function pullRequestRefFromUrl(
+  projectId: PullRequestRef["projectId"],
+  url: string,
+): SettlementPullRequest["ref"] {
+  const match = /^https?:\/\/[^/]+\/([^/]+\/[^/]+)\/pull\/(\d+)(?:[/?#]|$)/u.exec(url);
+  return match === null
+    ? undefined
+    : { projectId, repository: match[1]!, number: Number(match[2]) };
+}
+
 /** Cheap checks that run before any source control lookup. */
 export function isAutoSettlementCandidate(
   thread: Omit<ProjectionStore.ProjectionSettlementCandidate, "latestUserAuthoredMessageAt">,
@@ -162,36 +181,75 @@ export function isAutoSettlementCandidate(
   return wokeOnError || wokeOnCompletion;
 }
 
+/**
+ * The pull request that decides a thread: the latest of its visible links when it has any, else
+ * the branch lookup. Null while any link is still open or unread.
+ */
+export function effectiveSettlementPullRequest(
+  thread: Pick<ProjectionStore.ProjectionSettlementCandidate, "pullRequests" | "projectId">,
+  lookup: SettlementPullRequest | null,
+): SettlementPullRequest | null {
+  const links = visibleThreadPullRequests(thread.pullRequests ?? []);
+  if (links.some((link) => link.snapshot === null || link.snapshot.state === "open")) return null;
+  if (links.length === 0) return lookup;
+  const terminalAt = (link: (typeof links)[number]) => {
+    const snapshot = link.snapshot;
+    const value = snapshot?.state === "merged" ? snapshot.mergedAt : snapshot?.closedAt;
+    const timestamp = Date.parse(value ?? "");
+    return Number.isNaN(timestamp) ? Number.NEGATIVE_INFINITY : timestamp;
+  };
+  const latest = links.reduce((current, candidate) =>
+    terminalAt(candidate) > terminalAt(current) ? candidate : current,
+  );
+  return latest.snapshot === null
+    ? null
+    : {
+        state: latest.snapshot.state,
+        mergedAt: latest.snapshot.mergedAt ?? null,
+        closedAt: latest.snapshot.closedAt ?? null,
+        ref: { projectId: thread.projectId, repository: latest.repository, number: latest.number },
+      };
+}
+
+/**
+ * Whether a merged pull request's post-merge checks let its thread settle. `checks` is what the
+ * merge commit's check runs say, or null where they could not be read or there is nothing to wait
+ * for, which settles as it always did. Pending and failed checks hold the thread, so a red
+ * deploy stays in front of the user, but never past the cap.
+ */
+export function postMergeChecksAllowSettling(input: {
+  readonly mergedAt: string | null | undefined;
+  readonly nowMs: number;
+  readonly checks: MergeCommitChecks | null | undefined;
+}): boolean {
+  if (input.checks == null) return true;
+  const mergedAtMs = Date.parse(input.mergedAt ?? "");
+  if (Number.isNaN(mergedAtMs)) return true;
+  const sinceMergeMs = input.nowMs - mergedAtMs;
+  if (sinceMergeMs >= POST_MERGE_CHECKS_MAX_WAIT_MS) return true;
+  switch (input.checks.state) {
+    case "passed":
+      return true;
+    // Workflows register within moments of a push; none by now means none are coming.
+    case "none":
+      return sinceMergeMs >= POST_MERGE_CHECKS_GRACE_MS;
+    case "pending":
+    case "failed":
+      return false;
+  }
+}
+
 export function resolveAutoSettlementAt(input: {
   readonly thread: ProjectionStore.ProjectionSettlementCandidate;
   readonly pullRequest: SettlementPullRequest | null;
   readonly nowMs: number;
   readonly autoSettleAfterDays: number | null;
   readonly autoSettleOnMerge: boolean;
+  /** The merge commit's checks; leave out to settle on the merge alone. */
+  readonly postMergeChecks?: MergeCommitChecks | null;
 }): DateTime.Utc | null {
   const { thread } = input;
-  let pullRequest = input.pullRequest;
-  const links = visibleThreadPullRequests(thread.pullRequests ?? []);
-  if (links.some((link) => link.snapshot === null || link.snapshot.state === "open")) return null;
-  if (links.length > 0) {
-    const terminalAt = (link: (typeof links)[number]) => {
-      const snapshot = link.snapshot;
-      const value = snapshot?.state === "merged" ? snapshot.mergedAt : snapshot?.closedAt;
-      const timestamp = Date.parse(value ?? "");
-      return Number.isNaN(timestamp) ? Number.NEGATIVE_INFINITY : timestamp;
-    };
-    const latest = links.reduce((current, candidate) =>
-      terminalAt(candidate) > terminalAt(current) ? candidate : current,
-    );
-    pullRequest =
-      latest.snapshot === null
-        ? null
-        : {
-            state: latest.snapshot.state,
-            mergedAt: latest.snapshot.mergedAt ?? null,
-            closedAt: latest.snapshot.closedAt ?? null,
-          };
-  }
+  const pullRequest = effectiveSettlementPullRequest(thread, input.pullRequest);
   if (!isAutoSettlementCandidate(thread, input.nowMs)) return null;
   const activityAtMs = latestMillis([
     toMillis(thread.latestUserMessageAt),
@@ -199,7 +257,16 @@ export function resolveAutoSettlementAt(input: {
     toMillis(thread.latestRunStartedAt),
     toMillis(thread.latestRunCompletedAt),
   ]);
-  if (pullRequest !== null && pullRequestSettles(thread, pullRequest, input.autoSettleOnMerge)) {
+  if (
+    pullRequest !== null &&
+    pullRequestSettles(thread, pullRequest, input.autoSettleOnMerge) &&
+    (pullRequest.state !== "merged" ||
+      postMergeChecksAllowSettling({
+        mergedAt: pullRequest.mergedAt,
+        nowMs: input.nowMs,
+        checks: input.postMergeChecks,
+      }))
+  ) {
     return activityAtMs === null ? thread.createdAt : DateTime.makeUnsafe(activityAtMs);
   }
   if (input.autoSettleAfterDays === null || activityAtMs === null) return null;
@@ -286,6 +353,21 @@ export const make = Effect.gen(function* () {
     // sweep on a possibly stale cached answer.
     const candidates = threads.filter((thread) => isAutoSettlementCandidate(thread, nowMs));
 
+    // A read that failed (rate limit pause, network) holds the thread as pending checks do, so a
+    // blip never settles a thread whose deploy is still running; the cap still bounds the wait.
+    const postMergeChecks = (ref: NonNullable<SettlementPullRequest["ref"]>) =>
+      pullRequests.mergeCommitChecks(ref).pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.failCause(cause)
+            : Effect.logWarning("post-merge checks unavailable", {
+                repository: ref.repository,
+                number: ref.number,
+                cause: Cause.pretty(cause),
+              }).pipe(Effect.as({ state: "pending" } satisfies MergeCommitChecks)),
+        ),
+      );
+
     const settleThread = Effect.fn("ThreadSettlementServiceV2.settleThread")(
       function* (thread: (typeof candidates)[number], pullRequest: SettlementPullRequest | null) {
         const currentSettings = resolveProjectSettings(
@@ -293,13 +375,35 @@ export const make = Effect.gen(function* () {
           thread.projectId,
         ).settings;
         const decisionNow = yield* DateTime.now;
-        const settledAt = resolveAutoSettlementAt({
-          thread,
-          pullRequest,
-          nowMs: DateTime.toEpochMillis(decisionNow),
-          autoSettleAfterDays: currentSettings.sidebarAutoSettleAfterDays,
-          autoSettleOnMerge: currentSettings.sidebarAutoSettleOnMerge,
-        });
+        const decide = (postMergeChecks?: MergeCommitChecks | null) =>
+          resolveAutoSettlementAt({
+            thread,
+            pullRequest,
+            nowMs: DateTime.toEpochMillis(decisionNow),
+            autoSettleAfterDays: currentSettings.sidebarAutoSettleAfterDays,
+            autoSettleOnMerge: currentSettings.sidebarAutoSettleOnMerge,
+            ...(postMergeChecks === undefined ? {} : { postMergeChecks }),
+          });
+        // Settling on the merge alone is the most that can happen; only then is the merge
+        // commit worth a GitHub read, and not when inactivity would settle the thread anyway.
+        const settled = decide();
+        const merged = effectiveSettlementPullRequest(thread, pullRequest);
+        const waitsOnMerge =
+          settled !== null &&
+          merged?.state === "merged" &&
+          merged.ref !== undefined &&
+          currentSettings.sidebarAutoSettleOnMerge &&
+          resolveAutoSettlementAt({
+            thread,
+            pullRequest,
+            nowMs: DateTime.toEpochMillis(decisionNow),
+            autoSettleAfterDays: currentSettings.sidebarAutoSettleAfterDays,
+            autoSettleOnMerge: false,
+          }) === null;
+        const settledAt =
+          waitsOnMerge && merged?.ref !== undefined
+            ? decide(yield* postMergeChecks(merged.ref))
+            : settled;
         if (settledAt === null) return thread;
         const uuid = yield* crypto.randomUUIDv4;
         yield* orchestrator.dispatch({
@@ -443,6 +547,11 @@ export const make = Effect.gen(function* () {
           state: summary.state,
           closedAt: summary.closedAt ?? null,
           mergedAt: summary.mergedAt ?? null,
+          ref: {
+            projectId: reference.projectId,
+            repository: reference.repository,
+            number: reference.number,
+          },
         } satisfies SettlementPullRequest;
         const cwd = lookupCwdByThreadId.get(thread.id);
         if (summary.state !== "open" && thread.branch !== null && cwd !== undefined) {
@@ -469,7 +578,15 @@ export const make = Effect.gen(function* () {
       if (cwd === undefined) {
         return yield* Effect.die(new Error("thread project not found"));
       }
-      return yield* git.branchPullRequest({ cwd, branch: thread.branch });
+      const found = yield* git.branchPullRequest({ cwd, branch: thread.branch });
+      const project = projects.get(thread.projectId);
+      const ref =
+        found?.state === "merged" &&
+        project !== undefined &&
+        pullRequestMatchesProject(found, project)
+          ? pullRequestRefFromUrl(thread.projectId, found.url)
+          : undefined;
+      return found !== null && ref !== undefined ? { ...found, ref } : found;
     });
 
     yield* Effect.forEach(

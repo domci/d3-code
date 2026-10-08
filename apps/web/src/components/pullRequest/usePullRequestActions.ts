@@ -5,7 +5,7 @@ import { useAtomCommand } from "~/state/use-atom-command";
  * running two copies of "merge" or "resolve in a thread" would drift apart one fix at a time;
  * these hooks are where that behavior lives, and the panels are only where it is rendered.
  */
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { scopedThreadKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type {
   EnvironmentId,
@@ -14,6 +14,7 @@ import type {
   PullRequestDetail,
   PullRequestMergeMethod,
   PullRequestRef,
+  ScopedThreadRef,
 } from "@t3tools/contracts";
 import { useCallback, useRef, useState } from "react";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
@@ -34,7 +35,12 @@ import type { ReviewCommentContext } from "~/reviewCommentContext";
 import { pullRequestEnvironment } from "~/state/pullRequests";
 
 import { toastManager } from "../ui/toast";
-import { handoffPrompt, handoffReviewComments, readableFailure } from "./pullRequestDetail.logic";
+import {
+  handoffPrompt,
+  handoffReviewComments,
+  readableFailure,
+  stripPullRequestHandoffReferences,
+} from "./pullRequestDetail.logic";
 import { pullRequestEntryKey, type EnvironmentPullRequestEntry } from "./pullRequestList.logic";
 
 /** Resolve on demand so hidden quick actions do not rebuild the legacy project grouping. */
@@ -251,7 +257,54 @@ export type PullRequestHandoffDetail = Pick<
  * is closed by the time the next one opens. It is how a prompt the reader has since edited is told
  * apart from the one they were handed: only the sentence still exactly as written may be replaced.
  */
-const lastHandoffPromptByDraft = new Map<DraftId, string>();
+const lastHandoffPromptByDraft = new Map<string, string>();
+
+const composerTargetKey = (target: ScopedThreadRef | DraftId): string =>
+  typeof target === "string" ? target : scopedThreadKey(target);
+
+/**
+ * Leaves a hand-off's task in a composer for the reader to send. The latest press is the ask: it
+ * takes over what an earlier hand-off left, prompt and chips both, rather than stacking a second
+ * one under the first, while what the reader typed themselves survives.
+ */
+export function writeTaskToComposer(
+  target: ScopedThreadRef | DraftId,
+  task: PullRequestThreadTask,
+) {
+  const store = useComposerDraftStore.getState();
+  const draft = store.getComposerDraft(target);
+  const key = composerTargetKey(target);
+  const previousCommentIds = new Set((draft?.reviewComments ?? []).map((comment) => comment.id));
+  const repeatedCommentIds = new Set(
+    (task.reviewComments ?? [])
+      .filter((comment) => previousCommentIds.has(comment.id))
+      .map((comment) => comment.id),
+  );
+  const promptWithoutPreviousHandoff = stripPullRequestHandoffReferences(
+    draft?.prompt ?? "",
+    draft?.reviewComments ?? [],
+    repeatedCommentIds,
+  );
+  const prompt = handoffPrompt(
+    { prompt: promptWithoutPreviousHandoff, lastHandoffPrompt: lastHandoffPromptByDraft.get(key) },
+    task.prompt,
+  );
+  // Remember the hand-off's own contribution, not the merged prompt: only that sentence is
+  // this session's to take back next time, and the reader's text around it is not.
+  lastHandoffPromptByDraft.set(key, task.prompt);
+  store.setPrompt(target, prompt);
+  store.setReviewComments(
+    target,
+    handoffReviewComments(draft?.reviewComments ?? [], task.reviewComments ?? []),
+  );
+  for (const comment of task.reviewComments ?? []) {
+    if (!repeatedCommentIds.has(comment.id)) continue;
+    store.addReviewComment(target, comment, {
+      allowDuplicateReference: true,
+      insertAtCaret: false,
+    });
+  }
+}
 
 /**
  * The hand-offs from a pull request into a thread: a question that needs nothing checked out, and
@@ -293,29 +346,7 @@ export function usePullRequestHandoffs({
         () => null,
       ));
     if (session === null) return null;
-    const store = useComposerDraftStore.getState();
-    if (task === null) return session;
-    // The latest press is the ask: it takes over what an earlier hand-off left, prompt and chips
-    // both, rather than stacking a second one under the first. What the reader typed themselves
-    // survives — the composer they are handed is not always a fresh one, and a prompt they have
-    // since edited is theirs rather than the hand-off's.
-    const draft = store.getComposerDraft(session.draftId);
-    const existingComments = draft?.reviewComments ?? [];
-    const prompt = handoffPrompt(
-      {
-        prompt: draft?.prompt ?? "",
-        lastHandoffPrompt: lastHandoffPromptByDraft.get(session.draftId),
-      },
-      task.prompt,
-    );
-    // Remember the hand-off's own contribution, not the merged prompt: only that sentence is
-    // this session's to take back next time, and the reader's text around it is not.
-    lastHandoffPromptByDraft.set(session.draftId, task.prompt);
-    store.setPrompt(session.draftId, prompt);
-    store.setReviewComments(
-      session.draftId,
-      handoffReviewComments(existingComments, task.reviewComments ?? []),
-    );
+    if (task !== null) writeTaskToComposer(session.draftId, task);
     return session;
   };
 

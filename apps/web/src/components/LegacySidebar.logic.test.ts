@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildSubagentTree, partitionSettledThreads } from "./LegacySidebar.logic";
+import {
+  buildSubagentTree,
+  describeSubagentCounts,
+  partitionSettledThreads,
+} from "./LegacySidebar.logic";
 
 describe("partitionSettledThreads", () => {
   it("separates settled threads and keeps the incoming order within each group", () => {
@@ -73,5 +77,13 @@ describe("buildSubagentTree", () => {
     expect(ids(childrenByParentKey.get("e:a"))).toEqual(["b"]);
     expect(ids(childrenByParentKey.get("e:b"))).toEqual(["c", "d", "e"]);
     expect(childrenByParentKey.has("e:c")).toBe(false);
+  });
+});
+
+describe("describeSubagentCounts", () => {
+  it("omits zero parts", () => {
+    expect(describeSubagentCounts(2, 3)).toBe("2 working · 3 finished");
+    expect(describeSubagentCounts(0, 3)).toBe("3 finished");
+    expect(describeSubagentCounts(1, 0)).toBe("1 working");
   });
 });

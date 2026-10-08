@@ -17,7 +17,7 @@ import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
  * from the linked snapshot or branch summary, or just the link when status is unavailable.
  */
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import type { EnvironmentId, ProjectId, PullRequestRef } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectId, PullRequestRef, ScopedThreadRef } from "@t3tools/contracts";
 import { sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
 import {
   ArrowUpRightIcon,
@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { useState, type MouseEvent as ReactMouseEvent } from "react";
 
+import type { DraftId } from "~/composerDraftStore";
 import { useLiveRefresh } from "~/hooks/useLiveRefresh";
 import { usePullRequestChecksRefresh } from "~/hooks/usePullRequestChecksRefresh";
 import { cn } from "~/lib/utils";
@@ -47,6 +48,8 @@ import {
   resolveThreadPanelPullRequestAction,
 } from "../pullRequest/pullRequestDetail.logic";
 import { PullRequestChecksPopover } from "../pullRequest/PullRequestChecksPopover";
+import { PullRequestFixMenu } from "../pullRequest/PullRequestFixMenu";
+import { toastManager } from "../ui/toast";
 import {
   pullRequestChecksState,
   PullRequestCheckStatusIcon,
@@ -56,6 +59,7 @@ import {
 import {
   usePullRequestActionRunner,
   usePullRequestHandoffs,
+  writeTaskToComposer,
 } from "../pullRequest/usePullRequestActions";
 import {
   ChangeRequestStatusIcon,
@@ -91,6 +95,7 @@ export function ThreadDetailsPrRow({
   onOpen,
   onActed,
   onStopWatching,
+  composerDraftTarget,
 }: {
   environmentId: EnvironmentId;
   pr: ThreadPr;
@@ -106,6 +111,8 @@ export function ThreadDetailsPrRow({
   onActed?: () => void;
   /** Set while the server watches this pull request for the thread; stops the watch. */
   onStopWatching?: (() => void) | undefined;
+  /** The viewed thread's composer, which "Fix in this session" writes the task into. */
+  composerDraftTarget?: ScopedThreadRef | DraftId | undefined;
 }) {
   const serverConfigs = useServerConfigs();
   const supportsPullRequests =
@@ -190,24 +197,31 @@ export function ThreadDetailsPrRow({
     });
   };
 
-  const startFixChecks = () => {
+  const startFixChecks = (where: "here" | "new") => {
     if (detail === null) return;
     // The compact row fetches no conversation, so the handoff carries the failing checks alone;
     // review threads keep arriving through the full panel's richer version of this action.
-    void startHandoff(
-      "findings",
-      buildFixFindingsHandoff({
-        number: detail.number,
-        title: detail.title,
-        url: detail.url,
-        headBranch: detail.headBranch,
-        baseBranch: detail.baseBranch,
-        reviewThreads: [],
-        comments: [],
-        checks: detail.checks,
-        commentsTruncated: false,
-      }),
-    );
+    const task = buildFixFindingsHandoff({
+      number: detail.number,
+      title: detail.title,
+      url: detail.url,
+      headBranch: detail.headBranch,
+      baseBranch: detail.baseBranch,
+      reviewThreads: [],
+      comments: [],
+      checks: detail.checks,
+      commentsTruncated: false,
+    });
+    if (where === "here" && composerDraftTarget !== undefined) {
+      writeTaskToComposer(composerDraftTarget, task);
+      toastManager.add({
+        type: "success",
+        title: "Added to the composer",
+        description: "The task is in the composer — read it over, then send.",
+      });
+      return;
+    }
+    void startHandoff("findings", task);
   };
 
   // Host details distinguish drafts; all panels share the same PR-state glyph.
@@ -331,7 +345,7 @@ export function ThreadDetailsPrRow({
               destructive: true,
               suffix: <ArrowUpRightIcon aria-hidden className="size-3 shrink-0" />,
               tooltip: "Fix the failing checks in a new thread",
-              onClick: startFixChecks,
+              onClick: () => startFixChecks("new"),
             }
           : rowAction === "merge"
             ? {
@@ -426,7 +440,25 @@ export function ThreadDetailsPrRow({
             ) : null}
             {watchControl("icon")}
             <span className="flex-1" />
-            {trailingAction ? (
+            {rowAction === "fix" && trailingAction && composerDraftTarget !== undefined ? (
+              <PullRequestFixMenu
+                render={
+                  <ThreadDetailsControl
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    part="meta"
+                    tone="destructive"
+                  />
+                }
+                canFixHere
+                disabled={actionPending || handoff !== null}
+                onFix={startFixChecks}
+              >
+                {trailingAction.pending ? trailingAction.pendingLabel : trailingAction.label}
+                {trailingAction.suffix}
+              </PullRequestFixMenu>
+            ) : trailingAction ? (
               <Tooltip>
                 <TooltipTrigger
                   render={
