@@ -34,8 +34,9 @@ const subagentTreeKey = (thread: Pick<SidebarThreadSummary, "id" | "environmentI
  * Attaches subagent threads under their parent. `roots` are the non-subagent threads in the
  * incoming order; `childrenByParentKey` maps `${environmentId}:${threadId}` to that thread's
  * children in incoming order. Subagents whose parent is not in `threads` are dropped.
- * A fork nests under its source the same way, but only when the source is in `threads` and on
- * the same side of the active/settled split; otherwise it stays a root (shown with a fork mark).
+ * A fork nests under its source the same way, but only when the source is in `threads`, is not
+ * a subagent (those fold away or drop, and a fork is a full session that must stay listed) and is
+ * on the same side of the active/settled split; otherwise it stays a root (shown with a fork mark).
  * Nesting beyond `maxDepth` levels is listed beside the deepest level instead of going deeper.
  */
 export function buildSubagentTree<T extends SubagentTreeThread>(
@@ -53,6 +54,7 @@ export function buildSubagentTree<T extends SubagentTreeThread>(
       const source = parentId === null || parentId === undefined ? undefined : byKey.get(parentKey);
       if (
         !source ||
+        source.lineage.relationshipToParent === "subagent" ||
         (source.settledOverride === "settled") !== (thread.settledOverride === "settled")
       ) {
         roots.push(thread);
@@ -102,6 +104,65 @@ export function groupThreadChildren<T extends SubagentTreeThread & { readonly cr
       .toSorted((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt)),
     finished: children.filter((child) => !isFork(child) && !isRunning(child)),
   };
+}
+
+/**
+ * The threads that have a row under `roots`, top to bottom as rendered: each thread, then its
+ * running subagents, its forks, and its finished subagents when `isFinishedOpen(parentKey)`.
+ */
+export function listThreadRows<T extends SubagentTreeThread & { readonly createdAt: string }>(
+  roots: readonly T[],
+  childrenByParentKey: ReadonlyMap<string, readonly T[]>,
+  isRunning: (child: T) => boolean,
+  isFinishedOpen: (parentKey: string) => boolean,
+): T[] {
+  const rows: T[] = [];
+  const visit = (thread: T) => {
+    rows.push(thread);
+    const key = subagentTreeKey(thread);
+    const { running, forks, finished } = groupThreadChildren(
+      childrenByParentKey.get(key) ?? [],
+      isRunning,
+    );
+    for (const child of running) visit(child);
+    for (const child of forks) visit(child);
+    if (isFinishedOpen(key)) for (const child of finished) visit(child);
+  };
+  for (const root of roots) visit(root);
+  return rows;
+}
+
+/**
+ * What has to open for the row of `threadKey` to be on screen: the Settled group and the
+ * finished-subagent folds (parent keys) above it. Null when the thread has no row here.
+ * Used to reveal a thread once when it is navigated to; the user's toggles win afterwards.
+ */
+export function resolveThreadReveal<T extends SubagentTreeThread>(
+  tree: {
+    readonly active: readonly T[];
+    readonly settled: readonly T[];
+    readonly childrenByParentKey: ReadonlyMap<string, readonly T[]>;
+  },
+  isRunning: (child: T) => boolean,
+  threadKey: string,
+): { readonly settled: boolean; readonly foldedParentKeys: string[] } | null {
+  const find = (thread: T, folds: string[]): string[] | null => {
+    const key = subagentTreeKey(thread);
+    if (key === threadKey) return folds;
+    for (const child of tree.childrenByParentKey.get(key) ?? []) {
+      const folded = child.lineage.relationshipToParent !== "fork" && !isRunning(child);
+      const found = find(child, folded ? [...folds, key] : folds);
+      if (found) return found;
+    }
+    return null;
+  };
+  for (const settled of [false, true]) {
+    for (const root of settled ? tree.settled : tree.active) {
+      const foldedParentKeys = find(root, []);
+      if (foldedParentKeys) return { settled, foldedParentKeys };
+    }
+  }
+  return null;
 }
 
 /** Tooltip for a parent row's subagent expander, e.g. "2 working · 3 finished". */

@@ -5,8 +5,10 @@ import {
   buildSubagentTree,
   groupThreadChildren,
   describeSubagentCounts,
+  listThreadRows,
   partitionSettledThreads,
   planActiveThreadMove,
+  resolveThreadReveal,
   sortProjectsByCreation,
 } from "./LegacySidebar.logic";
 
@@ -115,6 +117,18 @@ describe("buildSubagentTree", () => {
     expect(ids(roots)).toEqual(["f"]);
   });
 
+  it("keeps a fork of a subagent as a root, so it neither folds away nor drops with it", () => {
+    const { roots, childrenByParentKey } = buildSubagentTree([
+      thread("a"),
+      thread("s", "a"),
+      fork("f", "s"),
+      thread("orphan", "gone"),
+      fork("g", "orphan"),
+    ]);
+    expect(ids(roots)).toEqual(["a", "f", "g"]);
+    expect(childrenByParentKey.has("e:s")).toBe(false);
+  });
+
   it("nests recursively and lists levels past the depth cap beside the deepest level", () => {
     const threads = [
       thread("a"),
@@ -153,6 +167,53 @@ describe("groupThreadChildren", () => {
     expect(running.map((c) => c.id)).toEqual(["busy"]);
     expect(forks.map((c) => c.id)).toEqual(["f1", "f2"]);
     expect(finished.map((c) => c.id)).toEqual(["done"]);
+  });
+});
+
+describe("visible rows and reveal", () => {
+  const row = (id: string, parent: string | null, relationship: string | null, at: string) =>
+    ({
+      id,
+      environmentId: "e",
+      createdAt: at,
+      settledOverride: null,
+      lineage: { relationshipToParent: relationship, parentThreadId: parent },
+    }) as never as Parameters<typeof groupThreadChildren>[0][number];
+  // a: busy + done subagents and a fork; done has its own finished subagent; z is settled.
+  const a = row("a", null, null, "2026-01-01");
+  const done = row("done", "a", "subagent", "2026-01-02");
+  const deep = row("deep", "done", "subagent", "2026-01-03");
+  const busy = row("busy", "a", "subagent", "2026-01-04");
+  const f = row("f", "a", "fork", "2026-01-05");
+  const z = row("z", null, null, "2026-01-06");
+  const zDone = row("zDone", "z", "subagent", "2026-01-07");
+  const childrenByParentKey = new Map([
+    ["e:a", [done, busy, f]],
+    ["e:done", [deep]],
+    ["e:z", [zDone]],
+  ]);
+  const isRunning = (thread: { id: string }) => thread.id === "busy";
+  const tree = { active: [a], settled: [z], childrenByParentKey };
+
+  it("lists rows in render order and leaves out closed finished-subagent folds", () => {
+    const rows = (open: readonly string[]) =>
+      listThreadRows([a], childrenByParentKey, isRunning, (key) => open.includes(key)).map(
+        (thread) => thread.id,
+      );
+    expect(rows([])).toEqual(["a", "busy", "f"]);
+    expect(rows(["e:a"])).toEqual(["a", "busy", "f", "done"]);
+    expect(rows(["e:a", "e:done"])).toEqual(["a", "busy", "f", "done", "deep"]);
+  });
+
+  it("opens only the folds above the thread, and nothing for rows that are already visible", () => {
+    const reveal = (key: string) => resolveThreadReveal(tree, isRunning, key);
+    expect(reveal("e:a")).toEqual({ settled: false, foldedParentKeys: [] });
+    expect(reveal("e:busy")).toEqual({ settled: false, foldedParentKeys: [] });
+    expect(reveal("e:f")).toEqual({ settled: false, foldedParentKeys: [] });
+    expect(reveal("e:deep")).toEqual({ settled: false, foldedParentKeys: ["e:a", "e:done"] });
+    expect(reveal("e:z")).toEqual({ settled: true, foldedParentKeys: [] });
+    expect(reveal("e:zDone")).toEqual({ settled: true, foldedParentKeys: ["e:z"] });
+    expect(reveal("e:elsewhere")).toBeNull();
   });
 });
 
