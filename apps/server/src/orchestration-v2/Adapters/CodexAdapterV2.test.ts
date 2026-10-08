@@ -399,7 +399,7 @@ describe("CodexAdapterV2 assistant message streaming", () => {
 });
 
 describe("CodexAdapterV2 runtime policy", () => {
-  it.effect("derives concrete Codex turn policies from every T3 runtime mode", () =>
+  it.effect("derives concrete Codex turn policies from every D3 runtime mode", () =>
     Effect.gen(function* () {
       const build = (
         runtimeMode: "approval-required" | "auto-accept-edits" | "auto" | "full-access",
@@ -463,7 +463,7 @@ describe("CodexAdapterV2 runtime policy", () => {
     }),
   );
 
-  it.effect("adds default-mode developer instructions when the T3 MCP server is attached", () =>
+  it.effect("adds default-mode developer instructions when the D3 MCP server is attached", () =>
     Effect.gen(function* () {
       const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
         nativeThreadId: "native-orchestration-instructions",
@@ -492,7 +492,7 @@ describe("CodexAdapterV2 runtime policy", () => {
     }),
   );
 
-  it.effect("omits default-mode collaboration settings without the T3 MCP server", () =>
+  it.effect("omits default-mode collaboration settings without the D3 MCP server", () =>
     Effect.gen(function* () {
       const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
         nativeThreadId: "native-default-without-t3-mcp",
@@ -513,7 +513,7 @@ describe("CodexAdapterV2 runtime policy", () => {
     }),
   );
 
-  it.effect("adds T3 plan-mode developer instructions when the T3 MCP server is attached", () =>
+  it.effect("adds D3 plan-mode developer instructions when the D3 MCP server is attached", () =>
     Effect.gen(function* () {
       const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
         nativeThreadId: "native-plan-with-t3-mcp",
@@ -539,7 +539,7 @@ describe("CodexAdapterV2 runtime policy", () => {
     }),
   );
 
-  it.effect("keeps Codex in plan mode without referencing unavailable T3 MCP tools", () =>
+  it.effect("keeps Codex in plan mode without referencing unavailable D3 MCP tools", () =>
     Effect.gen(function* () {
       const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
         nativeThreadId: "native-plan-without-t3-mcp",
@@ -2635,7 +2635,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     ),
   );
 
-  it.effect("preserves T3 context on the wire and restores it after compaction", () =>
+  it.effect("preserves D3 context on the wire and restores it after compaction", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const nativeThreadId = "context-thread";

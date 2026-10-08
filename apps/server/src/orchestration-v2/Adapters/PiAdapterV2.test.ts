@@ -461,7 +461,7 @@ const expectModelFailure = (errorMessage: string) =>
   }).pipe(Effect.scoped, Effect.provide(layerTest));
 
 describe("PiAdapterV2", () => {
-  it.effect("stops provider-initiated work that has no T3 turn owner", () =>
+  it.effect("stops provider-initiated work that has no D3 turn owner", () =>
     Effect.gen(function* () {
       const fake = yield* makeFakePi;
       const { runtime, takeEvent } = yield* openRuntime(fake);
@@ -484,7 +484,7 @@ describe("PiAdapterV2", () => {
     }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
-  it.effect("injects the T3 MCP extension and bearer when a session exists", () =>
+  it.effect("injects the D3 MCP extension and bearer when a session exists", () =>
     Effect.gen(function* () {
       McpProviderSession.setMcpProviderSession({
         environmentId: EnvironmentId.make("environment-pi-mcp"),

@@ -1547,7 +1547,7 @@ describe("OpenCode2 adapter", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("gives a resumed session T3's rules when it was made with others", () =>
+  it.effect("gives a resumed session D3's rules when it was made with others", () =>
     Effect.gen(function* () {
       const runtime = yield* openCode2ReplayRuntimeWithInstructions([
         ...opening,
@@ -1617,7 +1617,7 @@ describe("OpenCode2 adapter", () => {
       }).pipe(Effect.scoped),
   );
 
-  it.effect("breaks the thread and forgets it when the session was deleted outside T3", () =>
+  it.effect("breaks the thread and forgets it when the session was deleted outside D3", () =>
     Effect.gen(function* () {
       const { runtime, thread } = yield* resumed([
         out("session.prompt", { sessionID: SESSION, text: "<any>" }),
@@ -1669,7 +1669,7 @@ describe("OpenCode2 adapter", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("stops the requests a session still waits on when a restarted T3 loads it", () =>
+  it.effect("stops the requests a session still waits on when a restarted D3 loads it", () =>
     Effect.gen(function* () {
       // T3 restarted while the server kept waiting on an ask T3 no longer shows.
       const runtime = yield* openCode2ReplayRuntimeWithInstructions(
@@ -1748,7 +1748,7 @@ describe("OpenCode2 adapter", () => {
       assert.equal(ended?.status, "failed");
       assert.equal(
         ended?.status === "failed" ? ended.failure.message : undefined,
-        "OpenCode is waiting on a request T3 Code couldn't answer.",
+        "OpenCode is waiting on a request D3 Code couldn't answer.",
       );
     }).pipe(Effect.scoped),
   );
@@ -1783,12 +1783,12 @@ describe("OpenCode2 adapter", () => {
       yield* runtime.startTurn(turnInput(thread, bigPickle, "approval-required"));
       const request = yield* Fiber.join(requested);
       yield* runtime.respondToRuntimeRequest({ requestId: request!.id, decision: "accept" });
-      // Not "waiting on a request T3 Code couldn't answer": nothing waits on it.
+      // Not "waiting on a request D3 Code couldn't answer": nothing waits on it.
       assert.equal((yield* Fiber.join(terminal))?.status, "completed");
     }).pipe(Effect.scoped),
   );
 
-  it.effect("declines a form T3 cannot show with the reason, instead of leaving it open", () =>
+  it.effect("declines a form D3 cannot show with the reason, instead of leaving it open", () =>
     Effect.gen(function* () {
       const { runtime, thread } = yield* resumed([
         out("session.prompt", { sessionID: SESSION, text: "<any>" }),
@@ -1979,7 +1979,7 @@ describe("OpenCode2 adapter", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("stops the subagent whose form T3 cannot show or decline", () =>
+  it.effect("stops the subagent whose form D3 cannot show or decline", () =>
     Effect.gen(function* () {
       const linkForm = {
         id: "frm_0eb79ab35001fkvFECSh3wYNVD",
@@ -2679,7 +2679,7 @@ describe("OpenCode2 adapter", () => {
   );
 
   it.effect(
-    "registers T3's MCP server for the thread alone and removes it when the thread unloads",
+    "registers D3's MCP server for the thread alone and removes it when the thread unloads",
     () =>
       Effect.gen(function* () {
         McpProviderSession.setMcpProviderSession({

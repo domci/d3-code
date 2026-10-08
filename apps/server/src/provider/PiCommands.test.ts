@@ -8,7 +8,7 @@ import {
   withPiBuiltinSlashCommands,
 } from "./PiCommands.ts";
 
-it("maps current Pi skill metadata to T3's user and project skill scopes", () => {
+it("maps current Pi skill metadata to D3's user and project skill scopes", () => {
   expect(
     parsePiDiscoveredCommands({
       commands: [
@@ -54,7 +54,7 @@ it("maps current Pi skill metadata to T3's user and project skill scopes", () =>
   });
 });
 
-it("maps Pi global location and interface labels onto T3 skill fields", () => {
+it("maps Pi global location and interface labels onto D3 skill fields", () => {
   expect(
     parsePiDiscoveredCommands({
       commands: [

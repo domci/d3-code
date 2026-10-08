@@ -184,6 +184,16 @@ describe("isTemporaryWorktreeBranch", () => {
     expect(isTemporaryWorktreeBranch(`${WORKTREE_BRANCH_PREFIX}/DEADBEEF`)).toBe(true);
   });
 
+  it("names new temporary branches d3 and still recognises legacy t3 ones", () => {
+    expect(WORKTREE_BRANCH_PREFIX).toBe("d3");
+    expect(buildTemporaryWorktreeBranchName(() => "deadbeef")).toBe("d3/deadbeef");
+    expect(flattenTemporaryWorktreeBranchName("t3/deadbeef")).toBe("d3-deadbeef");
+    for (const name of ["t3/deadbeef", "t3-deadbeef", "d3/deadbeef", "d3-deadbeef"]) {
+      expect(isTemporaryWorktreeBranch(name)).toBe(true);
+    }
+    expect(isTemporaryWorktreeBranch("t3/feature")).toBe(false);
+  });
+
   it("normalizes a UUID-shaped random callback to the canonical 8-hex form", () => {
     expect(buildTemporaryWorktreeBranchName(() => "f4ae4e0e-f971-4d48-b4f2-9cf0aa54ab12")).toBe(
       `${WORKTREE_BRANCH_PREFIX}/f4ae4e0e`,

@@ -204,7 +204,7 @@ describe("t3 server command safety", () => {
             ),
             Effect.flip,
           );
-          expect(String(error)).toContain("A T3 Code server is already running");
+          expect(String(error)).toContain("A D3 Code server is already running");
           expect(yield* Effect.promise(() => NodeFSP.readFile(statePath, "utf8"))).toBe(record);
           expect(yield* pathExists(newDirectory)).toBe(false);
           expect(yield* Effect.promise(() => NodeFSP.readdir(stateDir))).toEqual([
@@ -264,7 +264,7 @@ describe("t3 app", () => {
           _tag: "DesktopAppUnreachableError",
           candidateAddresses: [expect.any(String)],
           workspaceRoot: yield* HostProcessWorkingDirectory,
-          message: expect.stringContaining("Could not reach the T3 Code desktop app."),
+          message: expect.stringContaining("Could not reach the D3 Code desktop app."),
           cause: { code: "ENOENT" },
         });
         expect(yield* pathExists(baseDir)).toBe(false);
@@ -325,7 +325,7 @@ describe("t3 app", () => {
     ),
   );
 
-  it.effect("never searches a dev state directory for an explicit T3 home", () =>
+  it.effect("never searches a dev state directory for an explicit D3 home", () =>
     withTempDirectory("t3-app-explicit-test-", (root) =>
       Effect.gen(function* () {
         vi.mocked(NodeOS.homedir).mockReturnValue(root);
