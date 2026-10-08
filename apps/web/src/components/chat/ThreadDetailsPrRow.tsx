@@ -185,16 +185,26 @@ export function ThreadDetailsPrRow({
     "merge",
   );
 
-  const startResolveConflicts = () => {
+  const startResolveConflicts = (where: "here" | "new") => {
     if (detail === null) return;
-    void startHandoff("conflicts", {
+    const task = {
       prompt: buildResolveConflictsPrompt({
         number: detail.number,
         url: detail.url,
         headBranch: detail.headBranch,
         baseBranch: detail.baseBranch,
       }),
-    });
+    };
+    if (where === "here" && composerDraftTarget !== undefined) {
+      writeTaskToComposer(composerDraftTarget, task);
+      toastManager.add({
+        type: "success",
+        title: "Added to the composer",
+        description: "The task is in the composer — read it over, then send.",
+      });
+      return;
+    }
+    void startHandoff("conflicts", task);
   };
 
   const startFixChecks = (where: "here" | "new") => {
@@ -325,7 +335,7 @@ export function ThreadDetailsPrRow({
           destructive: true,
           suffix: <ArrowUpRightIcon aria-hidden className="size-3 shrink-0" />,
           tooltip: "Check the branch out and resolve the conflicts in a new thread",
-          onClick: startResolveConflicts,
+          onClick: () => startResolveConflicts("new"),
         }
       : rowAction === "ready"
         ? {
@@ -440,7 +450,9 @@ export function ThreadDetailsPrRow({
             ) : null}
             {watchControl("icon")}
             <span className="flex-1" />
-            {rowAction === "fix" && trailingAction && composerDraftTarget !== undefined ? (
+            {(rowAction === "fix" || rowAction === "resolve") &&
+            trailingAction &&
+            composerDraftTarget !== undefined ? (
               <PullRequestFixMenu
                 render={
                   <ThreadDetailsControl
@@ -452,8 +464,12 @@ export function ThreadDetailsPrRow({
                   />
                 }
                 canFixHere
+                hereLabel={
+                  rowAction === "resolve" ? "Resolve in this session" : "Fix in this session"
+                }
+                newLabel={rowAction === "resolve" ? "Resolve in new session" : "Fix in new session"}
                 disabled={actionPending || handoff !== null}
-                onFix={startFixChecks}
+                onFix={rowAction === "resolve" ? startResolveConflicts : startFixChecks}
               >
                 {trailingAction.pending ? trailingAction.pendingLabel : trailingAction.label}
                 {trailingAction.suffix}

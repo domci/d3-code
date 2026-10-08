@@ -63,6 +63,7 @@ import {
   type ShortcutMatchContext,
 } from "~/keybindings";
 import { primaryServerKeybindingsAtom } from "~/state/server";
+import { PullRequestFixMenu } from "./PullRequestFixMenu";
 import {
   usePullRequestDefaultMergeMethodResolver,
   writeTaskToComposer,
@@ -1358,16 +1359,21 @@ export function PullRequestDetailPanel({
     );
   };
 
-  const startResolveConflicts = () => {
+  const startResolveConflicts = (where?: "here" | "new") => {
     if (!handoffSummary) return;
-    void startHandoff("conflicts", {
-      prompt: buildResolveConflictsPrompt({
-        number: handoffSummary.number,
-        url: handoffSummary.url,
-        headBranch: handoffSummary.headBranch,
-        baseBranch: handoffSummary.baseBranch,
-      }),
-    });
+    void startHandoff(
+      "conflicts",
+      {
+        prompt: buildResolveConflictsPrompt({
+          number: handoffSummary.number,
+          url: handoffSummary.url,
+          headBranch: handoffSummary.headBranch,
+          baseBranch: handoffSummary.baseBranch,
+        }),
+      },
+      "worktree",
+      where,
+    );
   };
 
   // The host says which strategies it offers at all; the repository narrows that to the ones
@@ -1562,18 +1568,26 @@ export function PullRequestDetailPanel({
       <TooltipTrigger
         render={
           <span className="inline-flex shrink-0">
-            <Button
-              size="xs"
-              variant="destructive-outline"
+            <PullRequestFixMenu
+              render={
+                <Button
+                  size="xs"
+                  variant="destructive-outline"
+                  aria-label={handoff === "conflicts" ? "Preparing..." : "Resolve conflicts"}
+                />
+              }
+              canFixHere={attachTarget !== null}
+              hereLabel="Resolve in this session"
+              newLabel="Resolve in new session"
+              newDisabled={checkoutRoot === null}
               disabled={handoff !== null || (attachTarget === null && checkoutRoot === null)}
-              onClick={startResolveConflicts}
-              aria-label={handoff === "conflicts" ? "Preparing..." : "Resolve conflicts"}
+              onFix={startResolveConflicts}
             >
               <PullRequestGlyph.conflicting aria-hidden className="size-3.5" />
               <span className="@max-[30rem]/pr-header:hidden">
                 {handoff === "conflicts" ? "Preparing..." : "Resolve conflicts"}
               </span>
-            </Button>
+            </PullRequestFixMenu>
           </span>
         }
       />
