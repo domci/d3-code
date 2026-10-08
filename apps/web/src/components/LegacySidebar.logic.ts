@@ -1,3 +1,10 @@
+import type { SidebarThreadSortOrder } from "@t3tools/contracts/settings";
+import {
+  planPinnedReorder,
+  sortActiveThreadsByOrderKey,
+} from "@t3tools/client-runtime/state/thread-sort";
+
+import { sortThreads } from "../lib/threadSort";
 import type { SidebarThreadSummary } from "../types";
 
 /** Stable split of an already-ordered thread list into active and settled threads. */
@@ -67,4 +74,70 @@ export function describeSubagentCounts(running: number, finished: number): strin
   return [running > 0 ? `${running} working` : null, finished > 0 ? `${finished} finished` : null]
     .filter((part) => part !== null)
     .join(" · ");
+}
+
+/**
+ * One project's rows for the tree sidebar. Timestamp modes sort everything by the chosen
+ * timestamp. "manual" keeps creation order for settled threads and subagents (nothing
+ * reshuffles on activity) and arranges the active top-level threads by their persisted
+ * `activeOrderKey`; keyless (new or reopened) threads lead, newest first.
+ */
+export function buildProjectThreadOrder<T extends SidebarThreadSummary>(
+  threads: readonly T[],
+  sortOrder: SidebarThreadSortOrder,
+): {
+  readonly roots: T[];
+  readonly active: T[];
+  readonly settled: T[];
+  readonly childrenByParentKey: ReadonlyMap<string, readonly T[]>;
+} {
+  const { roots, childrenByParentKey } = buildSubagentTree(sortThreads(threads, sortOrder));
+  const { active, settled } = partitionSettledThreads(roots);
+  return {
+    roots,
+    active: sortOrder === "manual" ? sortActiveThreadsByOrderKey(active) : active,
+    settled,
+    childrenByParentKey,
+  };
+}
+
+/**
+ * Order-key writes for dragging `movedKey` onto the row of `overKey` within one project's
+ * active list (`${environmentId}:${threadId}` keys). Usually one write; a keyless neighbour
+ * materializes keys for the whole list once. Empty when nothing needs to change.
+ */
+export function planActiveThreadMove<
+  T extends Pick<SidebarThreadSummary, "id" | "environmentId" | "activeOrderKey">,
+>(
+  activeThreads: readonly T[],
+  movedKey: string,
+  overKey: string,
+): Array<{ readonly thread: T; readonly orderKey: string }> {
+  const keys = activeThreads.map(subagentTreeKey);
+  const from = keys.indexOf(movedKey);
+  const to = keys.indexOf(overKey);
+  if (from === -1 || to === -1 || from === to) return [];
+  const orderedIds = [...keys];
+  orderedIds.splice(from, 1);
+  orderedIds.splice(to, 0, movedKey);
+  const keysById = new Map(activeThreads.map((t) => [subagentTreeKey(t), t.activeOrderKey]));
+  const byKey = new Map(activeThreads.map((t) => [subagentTreeKey(t), t]));
+  return planPinnedReorder({ orderedIds, keysById, movedId: movedKey }).map(({ id, orderKey }) => ({
+    thread: byKey.get(id)!,
+    orderKey,
+  }));
+}
+
+/**
+ * Oldest-created first. Fed to the manual project order so projects without a stored
+ * position (new ones, or ones from another device) append in a fixed order instead of
+ * the order the server happens to list them in.
+ */
+export function sortProjectsByCreation<T extends { readonly createdAt: string }>(
+  projects: readonly T[],
+): T[] {
+  return projects
+    .map((project) => ({ project, ms: Date.parse(project.createdAt) || 0 }))
+    .sort((left, right) => left.ms - right.ms)
+    .map(({ project }) => project);
 }

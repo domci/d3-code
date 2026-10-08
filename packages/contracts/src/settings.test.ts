@@ -610,6 +610,18 @@ describe("ClientSettings environment identification", () => {
 });
 
 describe("ClientSettings sidebar", () => {
+  it("defaults to stable manual project and session order, and honors stored values", () => {
+    const defaults = decodeClientSettings({});
+    expect(defaults.sidebarProjectSortOrder).toBe("manual");
+    expect(defaults.sidebarThreadSortOrder).toBe("manual");
+    const stored = decodeClientSettings({
+      sidebarProjectSortOrder: "updated_at",
+      sidebarThreadSortOrder: "created_at",
+    });
+    expect(stored.sidebarProjectSortOrder).toBe("updated_at");
+    expect(stored.sidebarThreadSortOrder).toBe("created_at");
+  });
+
   it("defaults to the per-project tree sidebar", () => {
     expect(decodeClientSettings({}).legacySidebarEnabled).toBe(true);
   });

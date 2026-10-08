@@ -39,6 +39,7 @@ import {
   type CollisionDetection,
   PointerSensor,
   type DragStartEvent,
+  closestCenter,
   closestCorners,
   pointerWithin,
   useSensor,
@@ -132,9 +133,10 @@ import { useDesktopUpdateState } from "../state/desktopUpdate";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { useThreadActionMenu } from "../hooks/useThreadActionMenu";
 import {
-  buildSubagentTree,
+  buildProjectThreadOrder,
   describeSubagentCounts,
-  partitionSettledThreads,
+  planActiveThreadMove,
+  sortProjectsByCreation,
 } from "./LegacySidebar.logic";
 import { formatWorktreePathForDisplay } from "../worktreeCleanup";
 import { projectEnvironment } from "../state/projects";
@@ -216,7 +218,6 @@ import {
   useThreadJumpHintVisibility,
   ThreadStatusPill,
 } from "./Sidebar.logic";
-import { sortThreads } from "../lib/threadSort";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useIsMobile } from "~/hooks/useMediaQuery";
@@ -245,6 +246,7 @@ const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
 const SIDEBAR_THREAD_SORT_LABELS: Record<SidebarThreadSortOrder, string> = {
   updated_at: "Last user message",
   created_at: "Created at",
+  manual: "Manual",
 };
 const SIDEBAR_LIST_ANIMATION_OPTIONS = {
   duration: 180,
@@ -333,6 +335,11 @@ function buildThreadJumpLabelMap(input: {
   return mapping.size > 0 ? mapping : EMPTY_THREAD_JUMP_LABELS;
 }
 
+type SortableRowBinding = Pick<
+  ReturnType<typeof useSortable>,
+  "setNodeRef" | "listeners" | "transform" | "transition" | "isDragging"
+> & { onClickCapture: (event: React.MouseEvent) => void };
+
 interface SidebarThreadRowProps {
   thread: SidebarThreadSummary;
   /** Subagent children of this thread; the expander shows only when there are any. */
@@ -377,6 +384,8 @@ interface SidebarThreadRowProps {
     threadRef?: ScopedThreadRef,
   ) => boolean;
   onFileDropThreads: (threadRef: ScopedThreadRef, files: File[]) => void;
+  /** Set on top-level active rows while sessions are arranged by hand. */
+  sortable?: SortableRowBinding;
 }
 
 function checkTaskPermission(environmentId: EnvironmentId): boolean {
@@ -418,6 +427,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     attemptSettleThread,
     openPrLink,
     onFileDropThreads,
+    sortable,
     thread,
   } = props;
   const canOperateThread = useEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope);
@@ -443,6 +453,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     return () => window.removeEventListener("dragend", clearFileDrag);
   }, [isFileDragOver]);
   const { leaseLiveStatus, rowRef } = useSidebarRowSubscriptionLease(isActive);
+  const setSortableNodeRef = sortable?.setNodeRef;
+  const setRowNodeRef = useCallback(
+    (node: HTMLLIElement | null) => {
+      rowRef(node);
+      setSortableNodeRef?.(node);
+    },
+    [rowRef, setSortableNodeRef],
+  );
   const localLastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
   const lastVisitedAt = resolveThreadLastVisitedAt(thread.lastVisitedAt, localLastVisitedAt);
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
@@ -717,7 +735,23 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   );
 
   return (
-    <SidebarMenuSubItem ref={rowRef} className="w-full" data-thread-item {...fileDropHandlers}>
+    <SidebarMenuSubItem
+      ref={sortable ? setRowNodeRef : rowRef}
+      className="w-full"
+      style={
+        sortable
+          ? {
+              transform: CSS.Translate.toString(sortable.transform),
+              transition: sortable.transition,
+              ...(sortable.isDragging ? { zIndex: 20, opacity: 0.8 } : {}),
+            }
+          : undefined
+      }
+      data-thread-item
+      {...fileDropHandlers}
+      {...sortable?.listeners}
+      onClickCapture={sortable?.onClickCapture}
+    >
       {/* A thread row is the legacy sidebar's own control (a focusable div that hosts nested
           links and buttons), not a SidebarMenuSubButton, so it owns its look here. */}
       <div
@@ -1013,7 +1047,42 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   );
 });
 
+/** A top-level active row that can be dragged to a new position in its project. */
+const SortableThreadRow = memo(function SortableThreadRow(
+  props: Omit<SidebarThreadRowProps, "sortable"> & {
+    dragEndedAtRef: React.RefObject<number>;
+  },
+) {
+  const { dragEndedAtRef, ...rowProps } = props;
+  const { thread, renamingThreadKey } = rowProps;
+  const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+  const { setNodeRef, listeners, transform, transition, isDragging } = useSortable({
+    id: threadKey,
+    disabled: renamingThreadKey === threadKey,
+  });
+  // A drag ends with a pointerup on the row, which the browser reports as a click.
+  const onClickCapture = useCallback(
+    (event: React.MouseEvent) => {
+      if (Date.now() - dragEndedAtRef.current < 300) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    },
+    [dragEndedAtRef],
+  );
+  return (
+    <SidebarThreadRow
+      {...rowProps}
+      sortable={{ setNodeRef, listeners, transform, transition, isDragging, onClickCapture }}
+    />
+  );
+});
+
 interface SidebarProjectThreadListProps {
+  /** Sessions are arranged by hand: top-level active rows can be dragged within the project. */
+  manualThreadOrder: boolean;
+  /** Persists a drag of the `movedKey` row onto the `overKey` row. */
+  onReorderThread: (movedKey: string, overKey: string) => void;
   projectKey: string;
   projectExpanded: boolean;
   hasOverflowingThreads: boolean;
@@ -1073,6 +1142,8 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
   props: SidebarProjectThreadListProps,
 ) {
   const {
+    manualThreadOrder,
+    onReorderThread,
     projectKey,
     projectExpanded,
     hasOverflowingThreads,
@@ -1130,7 +1201,26 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
       return childKey === activeRouteThreadKey || subtreeHasActiveThread(childKey);
     });
 
-  const renderThreadRow = (thread: SidebarThreadSummary, depth = 0): React.ReactNode => {
+  const threadDnDSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+  );
+  const dragEndedAtRef = useRef(0);
+  const handleThreadDragEnd = useCallback(
+    ({ active, over }: DragEndEvent) => {
+      dragEndedAtRef.current = Date.now();
+      if (over && active.id !== over.id) onReorderThread(String(active.id), String(over.id));
+    },
+    [onReorderThread],
+  );
+  const handleThreadDragCancel = useCallback(() => {
+    dragEndedAtRef.current = Date.now();
+  }, []);
+
+  const renderThreadRow = (
+    thread: SidebarThreadSummary,
+    depth = 0,
+    sortable = false,
+  ): React.ReactNode => {
     const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
     const children = childrenByParentKey.get(threadKey) ?? [];
     const finishedChildren = children.filter(
@@ -1142,36 +1232,41 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     const runningChildren = children.filter((child) =>
       runningThreadKeys.has(scopedThreadKey(scopeThreadRef(child.environmentId, child.id))),
     );
+    const rowProps = {
+      thread,
+      depth,
+      subagentRunning: runningChildren.length,
+      subagentFinished: finishedChildren.length,
+      finishedSubagentsExpanded: finishedExpanded,
+      onToggleSubagents: toggleSubagents,
+      orderedProjectThreadKeys,
+      isActive: activeRouteThreadKey === threadKey,
+      openPullRequestsInRightPanel,
+      jumpLabel: threadJumpLabelByKey.get(threadKey) ?? null,
+      renamingThreadKey,
+      renamingTitle,
+      setRenamingTitle,
+      startThreadRename,
+      renamingInputRef,
+      renamingCommittedRef,
+      handleThreadClick,
+      navigateToThread,
+      onFileDropThreads,
+      handleMultiSelectContextMenu,
+      handleThreadContextMenu,
+      clearSelection,
+      commitRename,
+      cancelRename,
+      attemptSettleThread,
+      openPrLink,
+    };
     return (
       <Fragment key={threadKey}>
-        <SidebarThreadRow
-          thread={thread}
-          depth={depth}
-          subagentRunning={runningChildren.length}
-          subagentFinished={finishedChildren.length}
-          finishedSubagentsExpanded={finishedExpanded}
-          onToggleSubagents={toggleSubagents}
-          orderedProjectThreadKeys={orderedProjectThreadKeys}
-          isActive={activeRouteThreadKey === threadKey}
-          openPullRequestsInRightPanel={openPullRequestsInRightPanel}
-          jumpLabel={threadJumpLabelByKey.get(threadKey) ?? null}
-          renamingThreadKey={renamingThreadKey}
-          renamingTitle={renamingTitle}
-          setRenamingTitle={setRenamingTitle}
-          startThreadRename={startThreadRename}
-          renamingInputRef={renamingInputRef}
-          renamingCommittedRef={renamingCommittedRef}
-          handleThreadClick={handleThreadClick}
-          navigateToThread={navigateToThread}
-          onFileDropThreads={onFileDropThreads}
-          handleMultiSelectContextMenu={handleMultiSelectContextMenu}
-          handleThreadContextMenu={handleThreadContextMenu}
-          clearSelection={clearSelection}
-          commitRename={commitRename}
-          cancelRename={cancelRename}
-          attemptSettleThread={attemptSettleThread}
-          openPrLink={openPrLink}
-        />
+        {sortable ? (
+          <SortableThreadRow {...rowProps} dragEndedAtRef={dragEndedAtRef} />
+        ) : (
+          <SidebarThreadRow {...rowProps} />
+        )}
         {/* Running subagents sit directly under their parent; finished ones fold below them. */}
         {runningChildren.map((child) => renderThreadRow(child, depth + 1))}
         {finishedExpanded
@@ -1183,7 +1278,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
 
   return (
     <SidebarMenuSub
-      ref={attachThreadListAutoAnimateRef}
+      ref={manualThreadOrder ? undefined : attachThreadListAutoAnimateRef}
       className="mx-0.5 my-0 w-full translate-x-0 overflow-hidden sm:mx-1"
     >
       {shouldShowThreadPanel && showEmptyThreadState ? (
@@ -1196,7 +1291,27 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
           </div>
         </SidebarMenuSubItem>
       ) : null}
-      {shouldShowThreadPanel && renderedThreads.map((thread) => renderThreadRow(thread))}
+      {shouldShowThreadPanel && manualThreadOrder ? (
+        <DndContext
+          sensors={threadDnDSensors}
+          collisionDetection={closestCenter}
+          modifiers={[restrictToVerticalAxis, restrictToFirstScrollableAncestor]}
+          onDragEnd={handleThreadDragEnd}
+          onDragCancel={handleThreadDragCancel}
+        >
+          <SortableContext
+            items={renderedThreads.map((thread) =>
+              scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+            )}
+            strategy={verticalListSortingStrategy}
+          >
+            {renderedThreads.map((thread) => renderThreadRow(thread, 0, true))}
+          </SortableContext>
+        </DndContext>
+      ) : null}
+      {shouldShowThreadPanel &&
+        !manualThreadOrder &&
+        renderedThreads.map((thread) => renderThreadRow(thread))}
 
       {projectExpanded && hasOverflowingThreads && !isThreadListExpanded && (
         <SidebarMenuSubItem className="w-full">
@@ -1319,7 +1434,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     isManualProjectSorting,
     dragHandleProps,
   } = props;
-  const { settleThread, unsettleThread } = useThreadActions();
+  const { settleThread, unsettleThread, reorderActiveThread } = useThreadActions();
   const environmentMachine = project.allRemoteMembersAreWsl
     ? "linux"
     : project.allRemoteMembersAreDesktopLocal
@@ -1479,18 +1594,17 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         },
       });
     };
-    const visibleProjectThreads = sortThreads(
-      projectThreads.filter((thread) => thread.archivedAt === null),
-      threadSortOrder,
-    );
+    const visibleProjectThreads = projectThreads.filter((thread) => thread.archivedAt === null);
     const projectStatus = resolveProjectStatusIndicator(
       visibleProjectThreads.map((thread) => resolveProjectThreadStatus(thread)),
     );
     // Subagents hang under their parent: only the roots are rows of their own, so they
     // neither count toward the preview nor settle on their own.
-    const { roots, childrenByParentKey } = buildSubagentTree(visibleProjectThreads);
-    const { active: activeProjectThreads, settled: settledProjectThreads } =
-      partitionSettledThreads(roots);
+    const {
+      childrenByParentKey,
+      active: activeProjectThreads,
+      settled: settledProjectThreads,
+    } = buildProjectThreadOrder(visibleProjectThreads, threadSortOrder);
     const runningThreadKeys = new Set<string>();
     for (const children of childrenByParentKey.values()) {
       for (const child of children) {
@@ -1585,6 +1699,39 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         (thread) =>
           scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === activeRouteThreadKey,
       ));
+
+  const manualThreadOrder = threadSortOrder === "manual";
+  const handleReorderThread = useCallback(
+    (movedKey: string, overKey: string) => {
+      void (async () => {
+        // Each write is a valid placement on its own, so stop at the first failure.
+        for (const { thread, orderKey } of planActiveThreadMove(
+          activeProjectThreads,
+          movedKey,
+          overKey,
+        )) {
+          const result = await reorderActiveThread(
+            scopeThreadRef(thread.environmentId, thread.id),
+            orderKey,
+          );
+          if (result._tag === "Failure") {
+            if (!isAtomCommandInterrupted(result)) {
+              const error = squashAtomCommandFailure(result);
+              toastManager.add(
+                stackedThreadToast({
+                  type: "error",
+                  title: "Failed to reorder sessions",
+                  description: error instanceof Error ? error.message : "An error occurred.",
+                }),
+              );
+            }
+            return;
+          }
+        }
+      })();
+    },
+    [activeProjectThreads, reorderActiveThread],
+  );
 
   const handleProjectButtonClick = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -2552,6 +2699,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       </div>
 
       <SidebarProjectThreadList
+        manualThreadOrder={manualThreadOrder}
+        onReorderThread={handleReorderThread}
         projectKey={project.projectKey}
         projectExpanded={projectExpanded}
         hasOverflowingThreads={hasOverflowingThreads}
@@ -3304,7 +3453,7 @@ export default function LegacySidebar() {
   );
   const orderedProjects = useMemo(() => {
     return orderItemsByPreferredIds({
-      items: projects,
+      items: sortProjectsByCreation(projects),
       preferredIds: projectOrder,
       getId: getProjectOrderKey,
       getPreferenceIds: (project) => [
@@ -3547,7 +3696,7 @@ export default function LegacySidebar() {
   const visibleSidebarThreadKeys = useMemo(
     () =>
       sortedProjects.flatMap((project) => {
-        const projectThreads = sortThreads(
+        const { active: activeThreads } = buildProjectThreadOrder(
           (threadsByProjectKey.get(project.projectKey) ?? []).filter(
             (thread) => thread.archivedAt === null,
           ),
@@ -3561,9 +3710,6 @@ export default function LegacySidebar() {
           return [];
         }
         // Settled threads sit in a collapsed group, so they get no jump slots.
-        const activeThreads = partitionSettledThreads(
-          buildSubagentTree(projectThreads).roots,
-        ).active;
         const isThreadListExpanded = expandedThreadListsByProject.has(project.projectKey);
         const hasOverflowingThreads = activeThreads.length > sidebarThreadPreviewCount;
         const previewThreads =
