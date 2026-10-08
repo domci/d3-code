@@ -31,6 +31,8 @@ import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
 import { planThreadDeletion } from "../orchestration-v2/ThreadDeletion.ts";
 import * as ProjectEnrichmentService from "./ProjectEnrichmentService.ts";
+import * as ProjectIconStore from "./ProjectIconStore.ts";
+import type { ProjectIconInvalidError } from "./ProjectIconStore.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 
 export interface ProjectCreateInput extends ProjectCreatePayload {
@@ -107,6 +109,7 @@ export type ProjectServiceError =
   | ProjectNotFoundError
   | ProjectConflictError
   | ProjectNotEmptyError
+  | ProjectIconInvalidError
   | ProjectOperationError;
 
 export class ProjectService extends Context.Service<
@@ -146,6 +149,7 @@ export class ProjectService extends Context.Service<
 
 export const make = Effect.gen(function* () {
   const projects = yield* ProjectStore.ProjectStoreV2;
+  const iconStore = yield* ProjectIconStore.make;
   const projectEnrichment = yield* ProjectEnrichmentService.ProjectEnrichmentService;
   const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
   const threadProjections = yield* ProjectionStore.ProjectionStoreV2;
@@ -368,6 +372,11 @@ export const make = Effect.gen(function* () {
               projectId: input.projectId,
               workspaceRoot: input.workspaceRoot,
             });
+      // An "attachment:<id>" reference is a freshly uploaded icon; claim it first.
+      const claimedIcon = ProjectIconStore.isProjectIconReference(input.faviconPath)
+        ? yield* iconStore.claim(input.faviconPath)
+        : undefined;
+      const faviconPath = claimedIcon ?? input.faviconPath;
       yield* commit({
         type: "project.meta.update",
         commandId: input.commandId,
@@ -379,12 +388,15 @@ export const make = Effect.gen(function* () {
           : { defaultModelSelection: input.defaultModelSelection }),
         ...(input.autoPull === undefined ? {} : { autoPull: input.autoPull }),
         ...(input.projectIcon === undefined ? {} : { projectIcon: input.projectIcon }),
-        ...(input.faviconPath === undefined ? {} : { faviconPath: input.faviconPath }),
+        ...(faviconPath === undefined ? {} : { faviconPath }),
         ...(input.defaultThreadEnvMode === undefined
           ? {}
           : { defaultThreadEnvMode: input.defaultThreadEnvMode }),
         ...(input.scripts === undefined ? {} : { scripts: input.scripts }),
-      });
+      }).pipe(Effect.tapError(() => iconStore.remove(claimedIcon)));
+      if (faviconPath !== undefined && faviconPath !== existing.value.faviconPath) {
+        yield* iconStore.remove(existing.value.faviconPath);
+      }
       if (workspaceRoot !== previousRoot) {
         yield* projectEnrichment.invalidate([previousRoot, workspaceRoot]);
       }
@@ -500,6 +512,7 @@ export const make = Effect.gen(function* () {
         yield* deleteChildThreads(input);
       }
       yield* commit({ type: "project.delete", commandId: input.commandId, projectId });
+      yield* iconStore.remove(existing.value.faviconPath);
       yield* projectEnrichment.invalidate([existing.value.workspaceRoot]);
       return yield* readCommitted(projectId);
     },

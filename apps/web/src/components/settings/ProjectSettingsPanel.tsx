@@ -28,6 +28,8 @@ import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environmen
 import { useThreadShells } from "../../state/entities";
 import { projectEnvironment } from "../../state/projects";
 import { ProjectFavicon } from "../ProjectFavicon";
+import { uploadProjectIcon, validateProjectIconFile } from "../../lib/projectIconUpload";
+import { ProjectIconDropzone } from "./ProjectIconDropzone";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -244,6 +246,11 @@ function ProjectDetail({
         projectIcon: ProjectIconOverride | null;
       }>,
       failureTitle: string,
+      /** Per-member override, e.g. an upload reference that is only valid on one environment. */
+      forMember?: (member: (typeof group.memberProjects)[number]) => Partial<{
+        faviconPath: string | null;
+        projectIcon: ProjectIconOverride | null;
+      }>,
     ): Promise<AtomCommandResult<void, unknown>> => {
       const denied = checkProjectAccess(group.memberProjects, failureTitle);
       if (denied) return denied;
@@ -265,7 +272,7 @@ function ProjectDetail({
         const result = mapAtomCommandResult(
           await updateProject({
             environmentId: member.environmentId,
-            input: { projectId: member.id, ...input },
+            input: { projectId: member.id, ...input, ...forMember?.(member) },
           }),
           () => undefined,
         );
@@ -325,6 +332,42 @@ function ProjectDetail({
       }
     },
     [updateAllMembers],
+  );
+
+  const [iconUploadError, setIconUploadError] = useState<string | null>(null);
+  const [iconUploadLabel, setIconUploadLabel] = useState<string | null>(null);
+  const uploadIconFile = useCallback(
+    async (file: File) => {
+      const invalid = validateProjectIconFile(file);
+      setIconUploadError(invalid);
+      if (invalid || savingFaviconRef.current) return;
+      savingFaviconRef.current = true;
+      setIsSavingFavicon(true);
+      const uploads = new Map<string, Awaited<ReturnType<typeof uploadProjectIcon>>>();
+      try {
+        for (const member of group.memberProjects) {
+          setIconUploadLabel(`Uploading… ${uploads.size + 1}/${group.memberProjects.length}`);
+          uploads.set(memberKey(member), await uploadProjectIcon(member.environmentId, file));
+        }
+        setIconUploadLabel("Saving…");
+        const result = await updateAllMembers(
+          { projectIcon: null },
+          "Failed to update project icon",
+          (member) => ({ faviconPath: uploads.get(memberKey(member))?.reference ?? null }),
+        );
+        if (result._tag === "Failure") {
+          for (const upload of uploads.values()) upload.discard();
+        }
+      } catch (error) {
+        for (const upload of uploads.values()) upload.discard();
+        setIconUploadError(error instanceof Error ? error.message : "Upload failed.");
+      } finally {
+        savingFaviconRef.current = false;
+        setIsSavingFavicon(false);
+        setIconUploadLabel(null);
+      }
+    },
+    [group.memberProjects, updateAllMembers],
   );
 
   const hasMultipleCheckouts = group.memberProjects.length > 1;
@@ -510,8 +553,14 @@ function ProjectDetail({
               ) : null
             }
             control={
-              <div className="flex items-center gap-2">
-                <ProjectFavicon project={representative} className="size-6" />
+              <div className="flex flex-wrap items-start justify-end gap-2">
+                <ProjectFavicon project={representative} className="mt-1.5 size-6" />
+                <ProjectIconDropzone
+                  disabled={isSavingFavicon || !canEditGroup}
+                  busyLabel={iconUploadLabel}
+                  error={iconUploadError}
+                  onFile={(file) => void uploadIconFile(file)}
+                />
                 <Button
                   size="sm"
                   variant="outline"
