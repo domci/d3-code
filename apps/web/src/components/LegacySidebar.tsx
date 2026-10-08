@@ -1744,16 +1744,21 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     visibleProjectThreads,
   ]);
 
-  // Collapsed by default, but never hide the thread that is open.
-  const [settledExpanded, setSettledExpanded] = useState(false);
+  // Collapsed by default. Opening a settled thread reveals the group once; settling the thread
+  // being viewed does not, and the toggle always wins afterwards.
+  const [isSettledExpanded, setSettledExpanded] = useState(false);
   const toggleSettledThreads = useCallback(() => setSettledExpanded((expanded) => !expanded), []);
-  const isSettledExpanded =
-    settledExpanded ||
-    (activeRouteThreadKey !== null &&
-      settledProjectThreads.some(
-        (thread) =>
-          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === activeRouteThreadKey,
-      ));
+  const settledThreadKeysRef = useRef<ReadonlySet<string>>(new Set());
+  settledThreadKeysRef.current = new Set(
+    settledProjectThreads.map((thread) =>
+      scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+    ),
+  );
+  useEffect(() => {
+    if (activeRouteThreadKey !== null && settledThreadKeysRef.current.has(activeRouteThreadKey)) {
+      setSettledExpanded(true);
+    }
+  }, [activeRouteThreadKey]);
 
   const manualThreadOrder = threadSortOrder === "manual";
   const handleReorderThread = useCallback(
