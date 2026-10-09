@@ -69,9 +69,9 @@ const BOARD_BODY = JSON.stringify({
   },
 });
 
-describe("projectBoardFromResponse", () => {
+describe("projectBoardFromResponses", () => {
   it("maps a project response to columns and cards, including unset and draft items", () => {
-    const board = Option.getOrThrow(GitHubProjectBoard.projectBoardFromResponse(BOARD_BODY));
+    const board = Option.getOrThrow(GitHubProjectBoard.projectBoardFromResponses([BOARD_BODY]));
     assert.deepStrictEqual(board, {
       projectId: "PVT_1",
       projectNumber: 3,
@@ -94,6 +94,7 @@ describe("projectBoardFromResponse", () => {
           labels: [{ name: "bug", color: "d73a4a" }],
           assignees: [{ login: "octocat", avatarUrl: "https://avatars/octocat" }],
           repository: "acme/web",
+          body: "",
         },
         {
           itemId: "PVTI_2",
@@ -106,6 +107,7 @@ describe("projectBoardFromResponse", () => {
           labels: [],
           assignees: [],
           repository: "acme/web",
+          body: "",
         },
         {
           itemId: "PVTI_3",
@@ -118,6 +120,7 @@ describe("projectBoardFromResponse", () => {
           labels: [],
           assignees: [],
           repository: null,
+          body: "",
         },
       ],
       truncated: true,
@@ -137,7 +140,7 @@ describe("projectBoardFromResponse", () => {
         },
       },
     });
-    const board = Option.getOrThrow(GitHubProjectBoard.projectBoardFromResponse(body));
+    const board = Option.getOrThrow(GitHubProjectBoard.projectBoardFromResponses([body]));
     assert.strictEqual(board.statusFieldId, null);
     assert.deepStrictEqual(board.columns, []);
   });
@@ -210,6 +213,27 @@ function makeService(
   };
 }
 
+const page = (start: number, more: boolean) =>
+  JSON.stringify({
+    data: {
+      node: {
+        id: "PVT_1",
+        number: 3,
+        title: "Roadmap",
+        url: "https://github.com/orgs/acme/projects/3",
+        field: {},
+        items: {
+          pageInfo: { hasNextPage: more, endCursor: `c${start}` },
+          nodes: Array.from({ length: 100 }, (_, index) => ({
+            id: `I${start + index}`,
+            content: { __typename: "DraftIssue", title: "t", bodyText: "x".repeat(3000) },
+          })),
+        },
+      },
+    },
+  });
+const endlessPage = page(0, true);
+
 describe("GitHubProjectBoard", () => {
   it.effect("reads the linked projects, then the chosen project's board", () => {
     const { calls, layer } = makeService((call) =>
@@ -224,10 +248,46 @@ describe("GitHubProjectBoard", () => {
       );
       // Project number 9 was asked for, so its id is what the board read names.
       assert.deepStrictEqual(calls[0]?.variables, { owner: "acme", name: "web" });
-      assert.deepStrictEqual(calls[1]?.variables, { id: "PVT_9" });
+      assert.deepStrictEqual(calls[1]?.variables, { id: "PVT_9", after: null });
       assert.strictEqual(calls[0]?.host, "github.com");
       assert.isTrue(calls.every((call) => call.allowReserve === true));
       assert.isNotNull(result.board);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("reads every page of items, and marks a board truncated only at the cap", () => {
+    const finite = makeService((call) =>
+      Effect.succeed(
+        call.query.includes("projectsV2")
+          ? LINKED_BODY
+          : call.variables?.after === "c0"
+            ? page(100, false)
+            : page(0, true),
+      ),
+    );
+    return Effect.gen(function* () {
+      const service = yield* GitHubProjectBoard.GitHubProjectBoard;
+      const result = yield* service.getProjectBoard({ cwd: "/work/web" });
+      assert.strictEqual(result.board?.items.length, 200);
+      assert.isFalse(result.board?.truncated);
+      assert.strictEqual(result.board?.items[0]?.body?.length, GitHubProjectBoard.MAX_BODY_CHARS);
+      assert.deepStrictEqual(
+        finite.calls.slice(1).map((call) => call.variables?.after),
+        [null, "c0"],
+      );
+    }).pipe(Effect.provide(finite.layer));
+  });
+
+  it.effect("stops at 1000 items and marks the board truncated", () => {
+    const { calls, layer } = makeService((call) =>
+      Effect.succeed(call.query.includes("projectsV2") ? LINKED_BODY : endlessPage),
+    );
+    return Effect.gen(function* () {
+      const service = yield* GitHubProjectBoard.GitHubProjectBoard;
+      const result = yield* service.getProjectBoard({ cwd: "/work/web" });
+      assert.strictEqual(result.board?.items.length, 1000);
+      assert.isTrue(result.board?.truncated);
+      assert.strictEqual(calls.length, 11);
     }).pipe(Effect.provide(layer));
   });
 

@@ -57,6 +57,8 @@ export const ProjectBoardItem = Schema.Struct({
   labels: Schema.Array(ProjectBoardLabel),
   assignees: Schema.Array(ProjectBoardAssignee),
   repository: Schema.NullOr(Schema.String),
+  /** The start of the issue, pull request or draft text (cut by the server), for searching. */
+  body: Schema.optional(Schema.String),
 });
 export type ProjectBoardItem = typeof ProjectBoardItem.Type;
 

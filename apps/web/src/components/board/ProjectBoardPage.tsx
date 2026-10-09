@@ -12,7 +12,7 @@ import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import * as Schema from "effect/Schema";
-import { useContext, useMemo, useRef, useState, type ReactNode } from "react";
+import { useContext, useDeferredValue, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { isElectron } from "../../env";
 import { useOpenDraftWithPrompt } from "../../hooks/useOpenDraftWithPrompt";
@@ -200,8 +200,11 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
 
   const [filterState, setFilterState] = useState(NO_BOARD_FILTERS);
   const facets = collectBoardFacets(shown.flatMap((entry) => entry.items));
+  const [cardSearch, setCardSearch] = useState("");
+  const deferredSearch = useDeferredValue(cardSearch);
   const filters: BoardFilters = {
     ...filterState,
+    search: deferredSearch,
     label: facets.labels.includes(filterState.label ?? "") ? filterState.label : null,
     assignee: facets.assignees.includes(filterState.assignee ?? "") ? filterState.assignee : null,
   };
@@ -315,7 +318,7 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
           .filter((entry) => entry.board.truncated)
           .map((entry) => (
             <p key={entry.repoKey} className="text-xs text-muted-foreground">
-              Showing the first 100 items of {repoOf(entry.repoKey)?.label}&apos;s project.
+              Showing the first 1,000 items of {repoOf(entry.repoKey)?.label}&apos;s project.
             </p>
           ))}
         <div className="flex items-start gap-3 overflow-x-auto pb-2">
@@ -358,6 +361,36 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
               </WorkspaceBreadcrumbItem>
             </WorkspaceBreadcrumb>
             <div className="min-w-0 flex-1" />
+            {loaded.length === 0 ? null : (
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="search"
+                  value={cardSearch}
+                  placeholder="Search cards"
+                  aria-label="Search cards by number, title, repository, label, assignee or text"
+                  onChange={(event) => setCardSearch(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") setCardSearch("");
+                  }}
+                  className="h-8 w-48 rounded-md border border-input bg-background px-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+                {cardSearch === "" ? null : (
+                  <>
+                    <span className="text-xs tabular-nums text-muted-foreground">
+                      {columns.reduce((total, column) => total + column.items.length, 0)} found
+                    </span>
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      aria-label="Clear search"
+                      onClick={() => setCardSearch("")}
+                    >
+                      Clear
+                    </Button>
+                  </>
+                )}
+              </div>
+            )}
             {boardRepos.length === 0 ? null : (
               <Menu>
                 <MenuTrigger render={<Button variant="outline" size="sm" />}>

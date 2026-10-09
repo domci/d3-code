@@ -6,6 +6,7 @@ import {
   collectBoardFacets,
   filterBoardItems,
   dedupeBoardRepositories,
+  matchesSearch,
   mergeBoardColumns,
   repositoryAccent,
   resolveDropTarget,
@@ -154,6 +155,43 @@ describe("filterBoardItems", () => {
 
   it("lists the labels and assignees present on the board", () => {
     expect(collectBoardFacets(items)).toEqual({ labels: ["bug", "docs"], assignees: ["octocat"] });
+  });
+});
+
+describe("matchesSearch", () => {
+  const card = item({
+    itemId: "s",
+    number: 284,
+    title: "Fix Login redirect",
+    repository: "acme/web",
+    labels: [{ name: "bug", color: "d73a4a" }],
+    assignees: [{ login: "octocat", avatarUrl: "" }],
+    body: "Happens after the OAuth callback",
+  });
+  it("matches a number with or without #, as a prefix", () => {
+    expect(matchesSearch(card, "284")).toBe(true);
+    expect(matchesSearch(card, "#284")).toBe(true);
+    expect(matchesSearch(card, "#28")).toBe(true);
+    expect(matchesSearch(card, "#84")).toBe(false);
+  });
+  it("matches text in title, repository, labels, assignees and body, ignoring case", () => {
+    for (const query of ["login", "ACME/web", "bug", "octo", "oauth"]) {
+      expect(matchesSearch(card, query)).toBe(true);
+    }
+    expect(matchesSearch(card, "nothing")).toBe(false);
+  });
+  it("needs every word to match", () => {
+    expect(matchesSearch(card, "login oauth #284")).toBe(true);
+    expect(matchesSearch(card, "login unrelated")).toBe(false);
+    expect(matchesSearch(card, "   ")).toBe(true);
+  });
+  it("combines with the other filters", () => {
+    const cards = [card, item({ itemId: "t", number: 285, title: "Fix Logout", state: "closed" })];
+    const ids = (filters: Parameters<typeof filterBoardItems>[1]) =>
+      filterBoardItems(cards, filters).map((entry) => entry.itemId);
+    expect(ids({ ...NO_BOARD_FILTERS, search: "fix" })).toEqual(["s", "t"]);
+    expect(ids({ ...NO_BOARD_FILTERS, search: "fix", state: "closed" })).toEqual(["t"]);
+    expect(ids({ ...NO_BOARD_FILTERS, search: "fix", label: "bug" })).toEqual(["s"]);
   });
 });
 

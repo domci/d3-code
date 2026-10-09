@@ -8,6 +8,8 @@ export interface BoardFilters {
   readonly state: BoardStateFilter;
   /** An assignee login present on the board, or null for every card. */
   readonly assignee: string | null;
+  /** Words that must all appear in the card; see `matchesSearch`. */
+  readonly search?: string;
 }
 
 export const NO_BOARD_FILTERS: BoardFilters = { label: null, state: "all", assignee: null };
@@ -35,6 +37,29 @@ function matchesState(item: ProjectBoardItem, state: BoardStateFilter): boolean 
   return state === "closed" ? closed : !closed;
 }
 
+/**
+ * Every word of the query must match: a number (`284` or `#284`, as a prefix of the card's
+ * number) or a case-insensitive substring of the title, repository, labels, assignees or body.
+ */
+export function matchesSearch(item: ProjectBoardItem, query: string): boolean {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return true;
+  const number = item.number === null ? "" : String(item.number);
+  const text = [
+    item.title,
+    item.repository ?? "",
+    ...item.labels.map((label) => label.name),
+    ...item.assignees.map((assignee) => assignee.login),
+    item.body ?? "",
+  ]
+    .join("\n")
+    .toLowerCase();
+  return words.every(
+    (word) =>
+      (/^#?\d+$/.test(word) && number.startsWith(word.replace("#", ""))) || text.includes(word),
+  );
+}
+
 export function filterBoardItems<Item extends ProjectBoardItem>(
   items: ReadonlyArray<Item>,
   filters: BoardFilters,
@@ -44,7 +69,8 @@ export function filterBoardItems<Item extends ProjectBoardItem>(
       matchesState(item, filters.state) &&
       (filters.label === null || item.labels.some((label) => label.name === filters.label)) &&
       (filters.assignee === null ||
-        item.assignees.some((assignee) => assignee.login === filters.assignee)),
+        item.assignees.some((assignee) => assignee.login === filters.assignee)) &&
+      matchesSearch(item, filters.search ?? ""),
   );
 }
 

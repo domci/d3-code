@@ -38,13 +38,18 @@ const LINKED_PROJECTS_QUERY = `query($owner:String!,$name:String!){
   }
 }`;
 
-const CONTENT_FIELDS = `number title url repository{ nameWithOwner }
+const CONTENT_FIELDS = `number title url bodyText repository{ nameWithOwner }
   assignees(first:5){ nodes{ login avatarUrl } }
   labels(first:10){ nodes{ name color } }`;
 
-// ponytail: first 100 items only; add cursor paging if boards grow past that.
-const BOARD_ITEMS = `items(first:100){
-  pageInfo{ hasNextPage }
+const PAGE_SIZE = 100;
+/** Items read per board: 10 pages. Past this the board is `truncated`. */
+export const MAX_BOARD_ITEMS = 1000;
+/** Longest body text sent to clients, which search it; the rest is cut here. */
+export const MAX_BODY_CHARS = 2000;
+
+const BOARD_ITEMS = `items(first:${PAGE_SIZE},after:$after){
+  pageInfo{ hasNextPage endCursor }
   nodes{
     id
     fieldValueByName(name:"Status"){ ... on ProjectV2ItemFieldSingleSelectValue { optionId } }
@@ -52,14 +57,14 @@ const BOARD_ITEMS = `items(first:100){
       __typename
       ... on Issue { ${CONTENT_FIELDS} issueState: state }
       ... on PullRequest { ${CONTENT_FIELDS} pullRequestState: state }
-      ... on DraftIssue { title }
+      ... on DraftIssue { title bodyText: body }
     }
   }
 }`;
 
 // `state` is aliased per type: GraphQL rejects one response key that is IssueState on Issue
 // and PullRequestState on PullRequest.
-const BOARD_QUERY = `query($id:ID!){
+const BOARD_QUERY = `query($id:ID!,$after:String){
   node(id:$id){
     ... on ProjectV2 {
       id number title url
@@ -114,6 +119,7 @@ const ItemContent = Schema.Struct({
   number: Schema.optional(Schema.Int),
   title: Schema.optional(Schema.String),
   url: Schema.optional(Schema.String),
+  bodyText: Schema.optional(Schema.NullOr(Schema.String)),
   issueState: Schema.optional(Schema.String),
   pullRequestState: Schema.optional(Schema.String),
   repository: Schema.optional(Schema.Struct({ nameWithOwner: Schema.String })),
@@ -161,7 +167,10 @@ const BoardResponse = Schema.Struct({
         ),
         items: Schema.optional(
           Schema.Struct({
-            pageInfo: Schema.Struct({ hasNextPage: Schema.Boolean }),
+            pageInfo: Schema.Struct({
+              hasNextPage: Schema.Boolean,
+              endCursor: Schema.optional(Schema.NullOr(Schema.String)),
+            }),
             nodes: Schema.optional(Schema.NullOr(Schema.Array(Schema.NullOr(BoardItemNode)))),
           }),
         ),
@@ -186,6 +195,7 @@ function toItem(node: BoardItemNode): ProjectBoardItem | null {
     itemId: node.id,
     title: content.title ?? "",
     statusOptionId: node.fieldValueByName?.optionId ?? null,
+    body: (content.bodyText ?? "").slice(0, MAX_BODY_CHARS),
   };
   if (content.__typename === "DraftIssue") {
     return {
@@ -227,43 +237,63 @@ function linkedProjectsFromResponse(
   );
 }
 
-/** One project's board, from the raw body of the board query. None when it cannot be read. */
-export function projectBoardFromResponse(body: string): Option.Option<ProjectBoard> {
+/** The cursor of the next page of items, when the body says there is one. */
+export function nextItemsCursor(body: string): Option.Option<string> {
   return decodeBoard(body).pipe(
-    Option.flatMap(({ data: { node } }) => {
-      if (
-        node === null ||
-        node.id === undefined ||
-        node.number === undefined ||
-        node.title === undefined ||
-        node.url === undefined
-      ) {
-        return Option.none();
-      }
-      // A project without a single-select Status answers `field: {}` or null.
-      const statusFieldId = node.field?.id ?? null;
-      return Option.some({
-        projectId: node.id,
-        projectNumber: node.number,
-        title: node.title,
-        url: node.url,
-        statusFieldId,
-        columns:
-          statusFieldId === null
-            ? []
-            : (node.field?.options ?? []).map((option) => ({
-                optionId: option.id,
-                name: option.name,
-                color: option.color ?? null,
-              })),
-        items: (node.items?.nodes ?? []).flatMap((item) => {
-          const mapped = item === null ? null : toItem(item);
-          return mapped === null ? [] : [mapped];
-        }),
-        truncated: node.items?.pageInfo.hasNextPage ?? false,
-      });
-    }),
+    Option.flatMap(({ data: { node } }) =>
+      node?.items?.pageInfo.hasNextPage === true && node.items.pageInfo.endCursor
+        ? Option.some(node.items.pageInfo.endCursor)
+        : Option.none(),
+    ),
   );
+}
+
+/**
+ * One project's board, from the raw bodies of its pages of the board query (the first holds the
+ * project and its Status field). None when a body cannot be read. The board is `truncated` when
+ * the last page still has more.
+ */
+export function projectBoardFromResponses(
+  bodies: ReadonlyArray<string>,
+): Option.Option<ProjectBoard> {
+  const pages = bodies.map((body) => decodeBoard(body));
+  if (pages.length === 0 || pages.some(Option.isNone)) return Option.none();
+  const nodes = pages.map((page) => Option.getOrThrow(page).data.node);
+  const node = nodes[0];
+  if (
+    node === null ||
+    node === undefined ||
+    node.id === undefined ||
+    node.number === undefined ||
+    node.title === undefined ||
+    node.url === undefined
+  ) {
+    return Option.none();
+  }
+  // A project without a single-select Status answers `field: {}` or null.
+  const statusFieldId = node.field?.id ?? null;
+  return Option.some({
+    projectId: node.id,
+    projectNumber: node.number,
+    title: node.title,
+    url: node.url,
+    statusFieldId,
+    columns:
+      statusFieldId === null
+        ? []
+        : (node.field?.options ?? []).map((option) => ({
+            optionId: option.id,
+            name: option.name,
+            color: option.color ?? null,
+          })),
+    items: nodes.flatMap((page) =>
+      (page?.items?.nodes ?? []).flatMap((item) => {
+        const mapped = item === null ? null : toItem(item);
+        return mapped === null ? [] : [mapped];
+      }),
+    ),
+    truncated: nodes.at(-1)?.items?.pageInfo.hasNextPage ?? false,
+  });
 }
 
 // GitHub says this about a token without the `project` scope in a GraphQL `INSUFFICIENT_SCOPES`
@@ -347,18 +377,24 @@ export const make = Effect.gen(function* () {
     // A remembered choice that no longer exists falls back to the first project.
     const chosen = linked.find((project) => project.number === input.projectNumber) ?? linked[0];
     if (chosen === undefined) return { projects: linked, board: null };
-    const board = yield* graphql("getProjectBoard", {
-      host: repository.host,
-      query: BOARD_QUERY,
-      variables: { id: chosen.id },
-    }).pipe(
-      Effect.flatMap((body) =>
-        Option.match(projectBoardFromResponse(body), {
-          onNone: () => Effect.fail(unreadable(operation)),
-          onSome: Effect.succeed,
-        }),
-      ),
-    );
+    // Pages are read in turn (each needs the last cursor); a failing page ends the read.
+    const pages: string[] = [];
+    let after: string | null = null;
+    while (pages.length < MAX_BOARD_ITEMS / PAGE_SIZE) {
+      const body: string = yield* graphql("getProjectBoard", {
+        host: repository.host,
+        query: BOARD_QUERY,
+        variables: { id: chosen.id, after },
+      });
+      pages.push(body);
+      const next = nextItemsCursor(body);
+      if (Option.isNone(next)) break;
+      after = next.value;
+    }
+    const board = yield* Option.match(projectBoardFromResponses(pages), {
+      onNone: () => Effect.fail(unreadable(operation)),
+      onSome: Effect.succeed,
+    });
     return { projects: linked, board };
   });
 
