@@ -9,6 +9,7 @@ import { normalizeClaudeTurnTokenUsage } from "../../provider/ClaudeTurnTokenUsa
 import {
   type CanUseTool,
   forkSession as forkClaudeSession,
+  renameSession as renameClaudeSession,
   type ForkSessionOptions,
   type ForkSessionResult,
   getSubagentMessages,
@@ -366,6 +367,14 @@ export interface ClaudeAgentSdkQueryRunnerShape {
   readonly forkSession: (
     input: ClaudeAgentSdkSessionForkInput,
   ) => Effect.Effect<ForkSessionResult, ClaudeAgentSdkQueryRunnerError>;
+  /**
+   * Appends the SDK's custom-title entry to the session transcript, so Claude Code lists
+   * the session by this name. Optional: runners without it leave sessions untitled.
+   */
+  readonly renameSession?: (input: {
+    readonly sessionId: string;
+    readonly title: string;
+  }) => Effect.Effect<void, ClaudeAgentSdkQueryRunnerError>;
   /** The tool call that launched a subagent, read from the CLI's session storage. */
   readonly subagentLaunchToolUseId: (
     input: ClaudeAgentSdkSubagentLookupInput,
@@ -759,6 +768,12 @@ export const layerQueryRunner: Layer.Layer<
         });
         return result;
       }),
+      renameSession: (input) =>
+        // No `dir`: the SDK then finds the transcript under whichever project directory holds it.
+        Effect.tryPromise({
+          try: () => renameClaudeSession(input.sessionId, input.title),
+          catch: (cause) => queryRunnerError(cause, "renameSession"),
+        }),
       subagentLaunchToolUseId: Effect.fn("ClaudeAgentSdkQueryRunner.subagentLaunchToolUseId")(
         function* (input: ClaudeAgentSdkSubagentLookupInput) {
           const protocolLogger = makeClaudeAgentSdkProtocolLogger({
@@ -3050,6 +3065,7 @@ export function makeClaudeAdapterV2(
     instanceId: adapterOptions.instanceId,
     driver: CLAUDE_PROVIDER,
     getCapabilities: () => Effect.succeed(ClaudeProviderCapabilitiesV2),
+    nativeThreadControls: { title: true },
     planSelectionTransition: () => Effect.succeed(turnScopedSelectionTransition()),
     openSession: Effect.fn("ClaudeAdapterV2.openSession")(
       function* (input: ProviderAdapter.ProviderAdapterV2OpenSessionInput) {
@@ -7763,6 +7779,22 @@ export function makeClaudeAdapterV2(
                 cause: "Claude V2 adapter does not implement snapshots.",
               }),
             ),
+          // Claude Code has no archive; only the title carries over to its session list.
+          setThreadTitle: (titleInput) => {
+            const sessionId = titleInput.providerThread.nativeThreadRef?.nativeId;
+            return sessionId == null || queryRunner.renameSession === undefined
+              ? Effect.void
+              : queryRunner.renameSession({ sessionId, title: titleInput.title }).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new ProviderAdapter.ProviderAdapterProtocolError({
+                        driver: CLAUDE_PROVIDER,
+                        detail: "Failed to title the Claude session.",
+                        payload: cause,
+                      }),
+                  ),
+                );
+          },
           rollbackThread: Effect.fn("ClaudeAdapterV2.rollbackThread")(
             function* (rollbackInput) {
               const currentTurn = yield* Ref.get(activeTurn);

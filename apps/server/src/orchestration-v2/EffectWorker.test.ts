@@ -23,6 +23,7 @@ import * as CheckpointRollbackService from "./CheckpointRollbackService.ts";
 import * as EffectOutbox from "./EffectOutbox.ts";
 import * as EffectWorker from "./EffectWorker.ts";
 import * as RunFinalizationService from "./RunFinalizationService.ts";
+import * as ProviderNativeSyncService from "./ProviderNativeSyncService.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 import * as ProviderTurnControlService from "./ProviderTurnControlService.ts";
 import * as ProviderTurnStartService from "./ProviderTurnStartService.ts";
@@ -139,6 +140,10 @@ function layerExecutorFor(input: {
     Layer.succeed(
       RuntimeRequestService.RuntimeRequestServiceV2,
       RuntimeRequestService.RuntimeRequestServiceV2.of({ respond: () => Effect.void }),
+    ),
+    Layer.succeed(
+      ProviderNativeSyncService.ProviderNativeSyncService,
+      ProviderNativeSyncService.ProviderNativeSyncService.of({ sync: () => Effect.void }),
     ),
     Layer.succeed(
       ThreadTitleRegenerationService.ThreadTitleRegenerationService,

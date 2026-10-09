@@ -1649,6 +1649,7 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
     instanceId: adapterOptions.instanceId,
     driver: CODEX_PROVIDER,
     getCapabilities: () => Effect.succeed(CodexProviderCapabilitiesV2),
+    nativeThreadControls: { title: true, archive: true },
     planSelectionTransition: () => Effect.succeed(turnScopedSelectionTransition()),
     openSession: (input) =>
       Effect.gen(function* () {
@@ -6761,6 +6762,48 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
                   new ProviderAdapterProtocolError({
                     driver: CODEX_PROVIDER,
                     detail: "Failed to upload Codex thread feedback.",
+                    payload: cause,
+                  }),
+              ),
+            ),
+          // The name the Codex apps list the conversation under.
+          setThreadTitle: (titleInput) =>
+            Effect.gen(function* () {
+              const threadId = yield* getNativeThreadId(titleInput.providerThread);
+              yield* ensureInitialized.pipe(
+                Effect.andThen(
+                  client.request("thread/name/set", { threadId, name: titleInput.title }),
+                ),
+              );
+            }).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProviderAdapterProtocolError({
+                    driver: CODEX_PROVIDER,
+                    detail: "Failed to name the Codex thread.",
+                    payload: cause,
+                  }),
+              ),
+            ),
+          // Archived threads leave the Codex apps' active lists. Resume unarchives on demand.
+          setThreadArchived: (archiveInput) =>
+            Effect.gen(function* () {
+              const threadId = yield* getNativeThreadId(archiveInput.providerThread);
+              yield* ensureInitialized.pipe(
+                // Raw, like the resume path: only the side effect matters, not the response.
+                Effect.andThen(
+                  client.raw.request(
+                    archiveInput.archived ? "thread/archive" : "thread/unarchive",
+                    { threadId },
+                  ),
+                ),
+              );
+            }).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProviderAdapterProtocolError({
+                    driver: CODEX_PROVIDER,
+                    detail: `Failed to ${archiveInput.archived ? "archive" : "unarchive"} the Codex thread.`,
                     payload: cause,
                   }),
               ),

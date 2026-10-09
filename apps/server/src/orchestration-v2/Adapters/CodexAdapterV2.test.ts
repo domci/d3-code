@@ -1735,6 +1735,7 @@ describe("CodexAdapterV2 session initialize", () => {
             modelSelection: CODEX_TEST_MODEL_SELECTION,
             runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
           }),
+        runtime,
         initializeRequests: () => initializeRequests,
       };
     });
@@ -1851,6 +1852,40 @@ describe("CodexAdapterV2 session initialize", () => {
       const providerThread = yield* session.ensureThread("thread-initialize-interrupted");
       assert.equal(providerThread.nativeThreadRef?.nativeId, "initialize-interrupted");
       assert.equal(session.initializeRequests(), 2);
+    }).pipe(Effect.scoped, Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+  );
+
+  it.effect("names, archives and restores the native thread without a turn", () =>
+    Effect.gen(function* () {
+      const providerRequest = (id: number, method: string, params: Record<string, string>) =>
+        [
+          { type: "expect_outbound", label: method, frame: { id, method, params } },
+          { type: "emit_inbound", label: method, frame: { id, result: {} } },
+        ] satisfies ReadonlyArray<CodexReplay.CodexAppServerReplayEntry>;
+      const preamble = replayPreamble("native-controls");
+      const session = yield* openReplaySession(
+        makeCodexReplayTranscript({
+          scenario: "native-controls",
+          entries: [
+            ...preamble.slice(0, 3),
+            ...providerRequest(2, "thread/name/set", {
+              threadId: "native-controls",
+              name: "Fix the login bug",
+            }),
+            ...providerRequest(3, "thread/archive", { threadId: "native-controls" }),
+            ...providerRequest(4, "thread/unarchive", { threadId: "native-controls" }),
+          ],
+        }),
+      );
+      const providerThread = {
+        nativeThreadRef: { driver: CodexAdapterV2.CODEX_DRIVER_KIND, nativeId: "native-controls" },
+      } as OrchestrationV2ProviderThread;
+
+      // One handshake serves all three calls; the replay fails on any other frame.
+      yield* session.runtime.setThreadTitle!({ providerThread, title: "Fix the login bug" });
+      yield* session.runtime.setThreadArchived!({ providerThread, archived: true });
+      yield* session.runtime.setThreadArchived!({ providerThread, archived: false });
+      assert.equal(session.initializeRequests(), 1);
     }).pipe(Effect.scoped, Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
   );
 });

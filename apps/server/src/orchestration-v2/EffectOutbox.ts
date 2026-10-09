@@ -106,6 +106,15 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
       Schema.Struct({ type: Schema.Literal("regenerate") }),
     ]),
   }),
+  /**
+   * Re-applies the thread's current title and/or settled state to the provider's own
+   * conversation, so the vendor's apps list it by that name and drop it when settled.
+   * It reads the thread when it runs, so a stale or repeated request converges.
+   */
+  Schema.Struct({
+    type: Schema.Literal("provider-native.sync"),
+    aspects: Schema.Array(Schema.Literals(["title", "archive"])),
+  }),
   /** Follows a Stop: sends `thread.stop` to every delegated task under the stopped thread. */
   Schema.Struct({
     type: Schema.Literal("delegated-tasks.stop"),
@@ -122,6 +131,7 @@ export const REPLAY_SAFE_EFFECT_TYPES_AFTER_PROCESS_LOSS = [
   "terminal.cleanup",
   "attachment.cleanup",
   "thread-title.generate",
+  "provider-native.sync",
   "delegated-tasks.stop",
 ] as const satisfies ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
 
@@ -309,8 +319,8 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
     // effect waiting out a retry backoff still blocks later ones, so a turn
     // cannot start while a failed rollback is about to restore files. A claim
     // that skips restart continuations is not blocked by them either.
-    // Title generation is correlated metadata work, so it has its own
-    // per-thread lane and cannot delay provider lifecycle effects.
+    // Title generation and provider-native sync are correlated metadata work, so they
+    // share their own per-thread lane and cannot delay provider lifecycle effects.
     const claimableCandidatePredicate = (
       availableBefore?: string,
       excludeRestartContinuations = false,
@@ -340,13 +350,13 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
             )
             AND (
               (
-                candidate.effect_type = 'thread-title.generate'
-                AND active.effect_type = 'thread-title.generate'
+                candidate.effect_type IN ('thread-title.generate', 'provider-native.sync')
+                AND active.effect_type IN ('thread-title.generate', 'provider-native.sync')
               )
               OR
               (
-                candidate.effect_type != 'thread-title.generate'
-                AND active.effect_type != 'thread-title.generate'
+                candidate.effect_type NOT IN ('thread-title.generate', 'provider-native.sync')
+                AND active.effect_type NOT IN ('thread-title.generate', 'provider-native.sync')
               )
             )
         )

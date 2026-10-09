@@ -481,6 +481,20 @@ function pendingThreadTitleGenerationEffect(
   };
 }
 
+/** Re-applies the thread's title and settled state to the provider's own conversation. */
+function pendingProviderNativeSyncEffect(
+  commandId: CommandId,
+  threadId: ThreadId,
+  aspects: ReadonlyArray<"title" | "archive">,
+): PendingOrchestrationEffectV2 {
+  return {
+    id: `effect:${commandId}:provider-native.sync`,
+    commandId,
+    threadId,
+    request: { type: "provider-native.sync", aspects },
+  };
+}
+
 const WORKSPACE_PREPARATION_INPUT = "Preparing workspace";
 
 /** A reopened preparation item drops the output and exit code of the attempt it replaces. */
@@ -3239,6 +3253,32 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       payload: updatedThread,
     });
 
+    const nativeSyncAspects: Array<"title" | "archive"> = [];
+    if (
+      (command.type === "thread.metadata.update" ||
+        command.type === "thread.title.regeneration.complete") &&
+      command.title !== undefined &&
+      updatedThread.title !== thread.title
+    ) {
+      nativeSyncAspects.push("title");
+    }
+    if (
+      command.type === "thread.settle" ||
+      command.type === "thread.unsettle" ||
+      command.type === "thread.archive" ||
+      command.type === "thread.unarchive" ||
+      // Pinning a settled thread promotes it back to active.
+      (command.type === "thread.pin" && thread.settledOverride === "settled")
+    ) {
+      nativeSyncAspects.push("archive");
+    }
+    if (nativeSyncAspects.length > 0) {
+      yield* Ref.update(effects, (existing) => [
+        ...existing,
+        pendingProviderNativeSyncEffect(command.commandId, command.threadId, nativeSyncAspects),
+      ]);
+    }
+
     if (command.type === "thread.metadata.update" && command.regenerateTitle === true) {
       yield* Ref.update(effects, (existing) => [
         ...existing,
@@ -4712,6 +4752,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           occurredAt: now,
           payload: thread,
         });
+        // No native sync here: the turn this message starts resumes the provider thread, and
+        // Codex unarchives on resume. A sync would also race that turn for its session.
         projection = yield* getProjectionWithPendingEvents(command.threadId, events);
       }
       if (projection.thread.snoozedUntil != null) {

@@ -941,6 +941,60 @@ describe("ClaudeAdapterV2 session permissions", () => {
   });
 });
 
+describe("ClaudeAdapterV2 native session title", () => {
+  it.effect("titles the Claude session by its native id and offers no archive", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const renamed: Array<{ sessionId: string; title: string }> = [];
+        const adapter = ClaudeAdapterV2.makeClaudeAdapterV2({
+          instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
+          settings: DEFAULT_CLAUDE_SETTINGS,
+          environment: {},
+          attachmentsDir: "/unused",
+          fileSystem: yield* FileSystem.FileSystem,
+          path: yield* Path.Path,
+          crypto: yield* Crypto.Crypto,
+          idAllocator: yield* IdAllocator.IdAllocatorV2,
+          queryRunner: {
+            allocateSessionId: Effect.succeed("native-thread-claude-title"),
+            open: () => Effect.die("unused"),
+            forkSession: () => Effect.die("unused"),
+            subagentLaunchToolUseId: () => Effect.succeed(null),
+            renameSession: (input) => Effect.sync(() => void renamed.push(input)),
+            assertComplete: Effect.void,
+          },
+        });
+        const runtimePolicy = ProviderAdapterV2RuntimePolicy.make({
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: "/workspace",
+        });
+        const threadId = ThreadId.make("thread-claude-title");
+        const runtime = yield* adapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make("provider-session-claude-title"),
+          modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+          runtimePolicy,
+        });
+        const providerThread = yield* runtime.ensureThread({
+          threadId,
+          modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+          runtimePolicy,
+        });
+
+        yield* runtime.setThreadTitle!({ providerThread, title: "Fix the login bug" });
+
+        assert.deepEqual(renamed, [
+          { sessionId: "native-thread-claude-title", title: "Fix the login bug" },
+        ]);
+        // Claude Code has no archive; settling must not pretend otherwise.
+        assert.deepEqual(adapter.nativeThreadControls, { title: true });
+        assert.isUndefined(runtime.setThreadArchived);
+      }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+    ),
+  );
+});
+
 describe("ClaudeAdapterV2 Auto-accept edits", () => {
   it.effect("asks before a command instead of allowing it", () =>
     Effect.scoped(
