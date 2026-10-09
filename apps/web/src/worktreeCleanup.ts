@@ -41,5 +41,9 @@ export function formatWorktreePathForDisplay(worktreePath: string): string {
   const normalized = trimmed.replace(/\\/g, "/").replace(/\/+$/, "");
   const parts = normalized.split("/");
   const lastPart = parts[parts.length - 1]?.trim() ?? "";
-  return lastPart.length > 0 ? lastPart : trimmed;
+  if (lastPart.length === 0) return trimmed;
+  // New layout `<id>/<repo>`: the leaf is the repo name for every worktree, so
+  // keep the id (a temp branch's 8-hex token, optionally with a collision suffix).
+  const parent = parts[parts.length - 2]?.trim() ?? "";
+  return /^[0-9a-f]{8}(?:-[0-9a-f]{4})?$/.test(parent) ? `${parent}/${lastPart}` : lastPart;
 }

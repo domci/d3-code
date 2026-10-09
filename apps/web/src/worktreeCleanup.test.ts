@@ -104,6 +104,15 @@ describe("formatWorktreePathForDisplay", () => {
     expect(result).toBe("my-worktree");
   });
 
+  it("keeps the id for the <id>/<repo> layout", () => {
+    expect(formatWorktreePathForDisplay("/home/dom/.t3/worktrees/359d97ab/frub-ai")).toBe(
+      "359d97ab/frub-ai",
+    );
+    expect(formatWorktreePathForDisplay("C:\\t3\\worktrees\\359d97ab-1f2e\\frub-ai\\")).toBe(
+      "359d97ab-1f2e/frub-ai",
+    );
+  });
+
   it("ignores trailing slashes", () => {
     const result = formatWorktreePathForDisplay("/tmp/custom-worktrees/my-worktree/");
     expect(result).toBe("my-worktree");

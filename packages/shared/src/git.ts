@@ -142,6 +142,12 @@ export function flattenTemporaryWorktreeBranchName(refName: string): string {
   return `${WORKTREE_BRANCH_PREFIX}-${token}`;
 }
 
+/** The 8-hex token of a temporary worktree branch, or null for any other branch name. */
+export function temporaryWorktreeToken(refName: string): string | null {
+  if (!isTemporaryWorktreeBranch(refName)) return null;
+  return flattenTemporaryWorktreeBranchName(refName).slice(WORKTREE_BRANCH_PREFIX.length + 1);
+}
+
 export function isTemporaryWorktreeBranch(refName: string): boolean {
   return TEMP_WORKTREE_BRANCH_PATTERN.test(refName.trim().toLowerCase());
 }

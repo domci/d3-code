@@ -2981,6 +2981,48 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect(
+      "lays temp-branch worktrees out as <token>/<repo>, avoids collisions, prunes <token>",
+      () =>
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const pathService = yield* Path.Path;
+          const cwd = yield* makeTmpDir();
+          const { initialBranch } = yield* initRepoWithCommit(cwd);
+          const worktreesDirectory = yield* makeTmpDir("custom-worktrees-");
+          const driver = yield* GitVcsDriver.GitVcsDriver;
+
+          const first = yield* driver.createWorktree(
+            { cwd, path: null, refName: initialBranch, newRefName: "d3/359d97ab" },
+            { worktreesDirectory },
+          );
+          assert.equal(
+            first.worktree.path,
+            pathService.join(worktreesDirectory, "359d97ab", pathService.basename(cwd)),
+          );
+
+          // Occupy the id for the next temp branch so the path must change.
+          yield* fileSystem.makeDirectory(
+            pathService.join(worktreesDirectory, "11112222", pathService.basename(cwd)),
+            { recursive: true },
+          );
+          const second = yield* driver.createWorktree(
+            { cwd, path: null, refName: initialBranch, newRefName: "d3/11112222" },
+            { worktreesDirectory },
+          );
+          assert.match(
+            pathService.relative(worktreesDirectory, second.worktree.path),
+            /^11112222-[0-9a-f]{4}[\\/]/,
+          );
+
+          yield* driver.removeWorktree({ cwd, path: first.worktree.path, force: false });
+          assert.equal(
+            yield* fileSystem.exists(pathService.join(worktreesDirectory, "359d97ab")),
+            false,
+          );
+        }),
+    );
+
     it.effect("creates worktrees under the configured worktrees directory", () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
@@ -2996,8 +3038,8 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         );
         const expected = pathService.join(
           worktreesDirectory,
-          pathService.basename(cwd),
           "feature-custom-dir",
+          pathService.basename(cwd),
         );
         assert.equal(created.worktree.path, expected);
         assert.equal(yield* fileSystem.exists(expected), true);

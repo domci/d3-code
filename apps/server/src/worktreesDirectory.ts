@@ -1,5 +1,7 @@
 import type * as Path from "effect/Path";
 
+import { temporaryWorktreeToken } from "@t3tools/shared/git";
+
 import { expandHomePathWith } from "./pathExpansion.ts";
 
 /**
@@ -41,4 +43,23 @@ export function managedWorktreesDirectories(
     if (directory !== null) directories.add(directory);
   }
   return [...directories];
+}
+
+/**
+ * `<parentDir>/<id>/<repo>`. The last segment is the repository directory name
+ * so vendor apps that group sessions by working-directory leaf (Codex) file D3
+ * worktrees under the right project. `<id>` is the temporary branch's 8-hex
+ * token, else the sanitized branch name; `suffix` disambiguates a collision.
+ * Worktrees created before this layout live at `<repo>/<branch>`; everything
+ * that recognises managed worktrees checks containment, so both work.
+ */
+export function buildWorktreePath(
+  parentDir: string,
+  repoName: string,
+  branch: string,
+  path: Path.Path,
+  suffix?: string,
+): string {
+  const id = temporaryWorktreeToken(branch) ?? branch.replace(/\//g, "-");
+  return path.join(parentDir, suffix ? `${id}-${suffix}` : id, repoName);
 }
