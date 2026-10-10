@@ -4,7 +4,11 @@ import {
   scopeThreadRef,
   scopedThreadKey,
 } from "@t3tools/client-runtime/environment";
-import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import {
+  isAtomCommandInterrupted,
+  settlePromise,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
 import { canSnooze, threadWokeAt } from "@t3tools/client-runtime/state/thread-settled";
 import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
 import {
@@ -12,6 +16,7 @@ import {
   AuthSourceControlWriteScope,
   EnvironmentAuthorizationError,
   EnvironmentId,
+  type LocalApi,
   type ScopedThreadRef,
   ThreadId,
   sessionGrantsScope,
@@ -267,6 +272,42 @@ function threadOperationFailure(target: ScopedThreadRef) {
       );
 }
 
+function readEnvironmentThreadShells(environmentId: EnvironmentId) {
+  return readEnvironmentThreadRefs(environmentId).flatMap((ref) => {
+    const shell = readThreadShell(ref);
+    return shell === null ? [] : [shell];
+  });
+}
+
+/**
+ * The worktree only this thread uses, plus the project root git runs from.
+ * Null when settling must leave worktrees alone: no worktree, shared with
+ * another thread, scratch project, unresolved thread, or no source control access.
+ */
+function readSoleOwnedWorktree(target: ScopedThreadRef) {
+  const thread = readThreadShell(target);
+  if (!thread || !readEnvironmentScope(target.environmentId, AuthSourceControlWriteScope)) {
+    return null;
+  }
+  const project = readProject({
+    environmentId: target.environmentId,
+    projectId: thread.projectId,
+  });
+  const environmentConfig = appAtomRegistry
+    .get(environmentServerConfigsAtom)
+    .get(target.environmentId);
+  if (!project || isScratchProject(project, environmentConfig?.scratchWorkspaceRoot)) {
+    return null;
+  }
+  const path = getOrphanedWorktreePathForThread(
+    readEnvironmentThreadShells(target.environmentId),
+    target.threadId,
+  );
+  return path === null
+    ? null
+    : { environmentId: target.environmentId, cwd: project.workspaceRoot, path };
+}
+
 export function useThreadActions() {
   const archiveThreadMutation = useOrchestrationCommand(threadEnvironment.archive, {
     reportFailure: false,
@@ -436,6 +477,27 @@ export function useThreadActions() {
     ],
   );
 
+  /** Runs `git worktree remove` from the project root; `force` also drops uncommitted changes. */
+  const removeWorktreeFromProject = useCallback(
+    async (input: { environmentId: EnvironmentId; cwd: string; path: string; force: boolean }) => {
+      if (!readEnvironmentScope(input.environmentId, AuthSourceControlWriteScope)) {
+        return AsyncResult.failure(
+          Cause.fail(
+            new EnvironmentAuthorizationError({
+              message: "This connection can no longer remove worktrees.",
+              requiredScope: AuthSourceControlWriteScope,
+            }),
+          ),
+        );
+      }
+      return removeWorktree({
+        environmentId: input.environmentId,
+        input: { cwd: input.cwd, path: input.path, force: input.force },
+      });
+    },
+    [removeWorktree],
+  );
+
   const deleteThread = useCallback(
     async (target: ScopedThreadRef, opts: { deletedThreadKeys?: ReadonlySet<string> } = {}) => {
       const permissionFailure = threadOperationFailure(target);
@@ -453,10 +515,7 @@ export function useThreadActions() {
         return result;
       }
       const { thread, threadRef } = resolved;
-      const threads = readEnvironmentThreadRefs(threadRef.environmentId).flatMap((ref) => {
-        const shell = readThreadShell(ref);
-        return shell === null ? [] : [shell];
-      });
+      const threads = readEnvironmentThreadShells(threadRef.environmentId);
       const threadProject = readProject({
         environmentId: threadRef.environmentId,
         projectId: thread.projectId,
@@ -577,26 +636,12 @@ export function useThreadActions() {
         return deleteResult;
       }
 
-      const removeResult = readEnvironmentScope(
-        threadRef.environmentId,
-        AuthSourceControlWriteScope,
-      )
-        ? await removeWorktree({
-            environmentId: threadRef.environmentId,
-            input: {
-              cwd: threadProject.workspaceRoot,
-              path: orphanedWorktreePath,
-              force: true,
-            },
-          })
-        : AsyncResult.failure(
-            Cause.fail(
-              new EnvironmentAuthorizationError({
-                message: "This connection can no longer remove worktrees.",
-                requiredScope: AuthSourceControlWriteScope,
-              }),
-            ),
-          );
+      const removeResult = await removeWorktreeFromProject({
+        environmentId: threadRef.environmentId,
+        cwd: threadProject.workspaceRoot,
+        path: orphanedWorktreePath,
+        force: true,
+      });
       const refreshResult =
         removeResult._tag === "Success"
           ? await refreshVcsStatus({
@@ -644,7 +689,7 @@ export function useThreadActions() {
       getCurrentRouteThreadRef,
       loadSessionState,
       refreshVcsStatus,
-      removeWorktree,
+      removeWorktreeFromProject,
       router,
       resolveThreadTarget,
       sidebarThreadSortOrder,
@@ -764,6 +809,64 @@ export function useThreadActions() {
     [pinThread, unpinThreadMutation],
   );
 
+  /**
+   * Removes the worktree of a just-settled thread without force, so git itself
+   * refuses when it has uncommitted changes. A refusal keeps the worktree and
+   * offers a confirmed force-delete from the warning toast.
+   */
+  const removeSettledThreadWorktree = useCallback(
+    async (
+      worktree: { environmentId: EnvironmentId; cwd: string; path: string },
+      localApi: LocalApi,
+    ) => {
+      const displayPath = formatWorktreePathForDisplay(worktree.path);
+      const removeResult = await removeWorktreeFromProject({ ...worktree, force: false });
+      if (removeResult._tag === "Success" || isAtomCommandInterrupted(removeResult)) return;
+      const keptToastId = toastManager.add(
+        stackedThreadToast({
+          type: "warning",
+          title: "Worktree kept",
+          // The raw error is internal text, so name the usual reason instead.
+          description: `${displayPath} was not removed because it has uncommitted changes or is in use.`,
+          // Stay until dismissed or acted on, so "Delete anyway" remains reachable.
+          timeout: 0,
+          actionVariant: "destructive",
+          actionProps: {
+            children: "Delete anyway",
+            onClick: () => {
+              void (async () => {
+                toastManager.close(keptToastId);
+                const confirmed = await settlePromise(() =>
+                  localApi.dialogs.confirm(
+                    [
+                      `Delete worktree ${displayPath}?`,
+                      "Uncommitted changes in it will be lost.",
+                    ].join("\n"),
+                    { variant: "destructive" },
+                  ),
+                );
+                if (confirmed._tag === "Failure" || !confirmed.value) return;
+                const forceResult = await removeWorktreeFromProject({ ...worktree, force: true });
+                if (forceResult._tag === "Success" || isAtomCommandInterrupted(forceResult)) return;
+                const forceError = squashAtomCommandFailure(forceResult);
+                toastManager.add(
+                  stackedThreadToast({
+                    type: "error",
+                    title: "Failed to delete worktree",
+                    description: `Could not remove ${displayPath}. ${
+                      forceError instanceof Error ? forceError.message : "An error occurred."
+                    }`,
+                  }),
+                );
+              })();
+            },
+          },
+        }),
+      );
+    },
+    [removeWorktreeFromProject],
+  );
+
   const settleThread = useCallback(
     async (target: ScopedThreadRef) => {
       // Version skew: never send the command to a server that predates it —
@@ -792,6 +895,8 @@ export function useThreadActions() {
       ThreadUndo.invalidate("pin", scopedThreadKey(target));
       ThreadUndo.invalidate("snooze", scopedThreadKey(target));
       const action = ThreadUndo.begin("settle", scopedThreadKey(target));
+      const localApi = readLocalApi();
+      const soleOwnedWorktree = localApi ? readSoleOwnedWorktree(target) : null;
       const result = await settleThreadMutation({
         environmentId: target.environmentId,
         input: { threadId: target.threadId },
@@ -826,11 +931,15 @@ export function useThreadActions() {
         },
         failureTitle: "Failed to undo settle",
       });
+      if (localApi && soleOwnedWorktree) {
+        void removeSettledThreadWorktree(soleOwnedWorktree, localApi);
+      }
       return result;
     },
     [
       markThreadVisited,
       pinThread,
+      removeSettledThreadWorktree,
       resolveThreadTarget,
       settleThreadMutation,
       snoozeThreadMutation,

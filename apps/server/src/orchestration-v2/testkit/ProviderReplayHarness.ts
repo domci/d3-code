@@ -47,6 +47,7 @@ import * as ProviderTurnStartServiceTestkit from "../ProviderTurnStartService.te
 import * as RunExecutionService from "../RunExecutionService.ts";
 import * as RunFinalizationService from "../RunFinalizationService.ts";
 import * as ThreadTitleRegenerationService from "../ThreadTitleRegenerationService.ts";
+import * as ProviderNativeSyncService from "../ProviderNativeSyncService.ts";
 import * as RuntimePolicy from "../RuntimePolicy.ts";
 import * as TurnItemPositionStore from "../TurnItemPositionStore.ts";
 import * as RuntimeRequestService from "../RuntimeRequestService.ts";
@@ -416,6 +417,16 @@ export function layerWithRegistry<Error>(
       execute: () => Effect.void,
     }),
   );
+  const layerProviderNativeSyncProvided = ProviderNativeSyncService.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        layerStores,
+        layerProvidedRegistry,
+        layerProviderSessionManagerProvided,
+        layerRuntime,
+      ),
+    ),
+  );
   const layerOrchestratorProvided = Orchestrator.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -467,6 +478,7 @@ export function layerWithRegistry<Error>(
         layerProviderTurnStartServiceProvided,
         layerRuntimeRequestServiceProvided,
         layerThreadTitleRegenerationTest,
+        layerProviderNativeSyncProvided,
         layerServerSettings,
         layerThreadManagementProvided,
       ),

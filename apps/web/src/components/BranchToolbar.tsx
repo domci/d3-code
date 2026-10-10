@@ -2,6 +2,7 @@ import { ComposerContextLabel } from "./ComposerContextLabel";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import {
+  CheckIcon,
   ChevronDownIcon,
   FolderGit2Icon,
   FolderGitIcon,
@@ -52,6 +53,7 @@ import {
   MenuSeparator,
   MenuTrigger,
 } from "./ui/menu";
+import { DraftProjectChip } from "./DraftProjectChip";
 import { Separator } from "./ui/separator";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { MiddleTruncate } from "./ui/middle-truncate";
@@ -61,13 +63,17 @@ import { measureRestingComposerControls } from "./chat/restingComposerControlsMe
 import { resolveRestingComposerControlsNaturalWidth } from "./composerFooterLayout";
 import { cn } from "~/lib/utils";
 
+// Pill look for the draft chip row: the wrapped controls drop their own chrome and read at full contrast.
+const CHIP_CLASS =
+  "inline-flex h-7 min-w-0 max-w-full items-center gap-1 rounded-full border border-border bg-secondary px-1 text-xs text-foreground [&_button]:rounded-full [&_button]:text-foreground! [&_[data-composer-context-control]]:text-foreground!";
+
 export interface BranchToolbarHandle {
   openBranchPicker: () => void;
   usePreviousWorktree: () => void;
 }
 
 interface BranchToolbarProps {
-  layout?: "composer" | "panel";
+  layout?: "composer" | "panel" | "chips";
   panelSection?: "all" | "workspace" | "branch";
   forceNewWorktree?: boolean;
   ref?: Ref<BranchToolbarHandle>;
@@ -643,6 +649,81 @@ export const BranchToolbar = memo(function BranchToolbar({
             {...(onCheckoutPullRequestRequest ? { onCheckoutPullRequestRequest } : {})}
             {...(onComposerFocusRequest ? { onComposerFocusRequest } : {})}
           />
+        ) : null}
+      </div>
+    );
+  }
+
+  if (layout === "chips") {
+    const worktreeChecked = effectiveEnvMode === "worktree";
+    return (
+      <div className="flex flex-wrap items-center gap-1.5 pb-2" data-composer-context-chips>
+        {showEnvironmentIndicator && availableEnvironments ? (
+          <span className={CHIP_CLASS}>
+            <BranchToolbarEnvironmentSelector
+              autoEnvironmentLabel={autoEnvironmentLabel}
+              onAutoEnvironment={onAutoEnvironment}
+              envLocked={envLocked}
+              environmentId={environmentId}
+              availableEnvironments={availableEnvironments}
+              {...(showEnvironmentPicker && onEnvironmentChange ? { onEnvironmentChange } : {})}
+            />
+          </span>
+        ) : null}
+        {draftId ? (
+          <span className={CHIP_CLASS}>
+            <DraftProjectChip
+              draftId={draftId}
+              environmentId={activeProject.environmentId}
+              projectId={activeProject.id}
+              disabled={envLocked}
+            />
+          </span>
+        ) : null}
+        {showGitControls ? (
+          <>
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={worktreeChecked}
+              disabled={envModeLocked || forceNewWorktree}
+              onClick={() => onEnvModeChange(worktreeChecked ? "local" : "worktree")}
+              className={cn(
+                CHIP_CLASS,
+                "cursor-pointer gap-1.5 px-2 outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-64",
+              )}
+            >
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "flex size-3.5 shrink-0 items-center justify-center rounded-xs border",
+                  worktreeChecked
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-input bg-background",
+                )}
+              >
+                {worktreeChecked ? <CheckIcon className="size-2.5" strokeWidth={3} /> : null}
+              </span>
+              worktree
+            </button>
+            <span className={CHIP_CLASS}>
+              <BranchToolbarBranchSelector
+                forceNewWorktree={forceNewWorktree}
+                ref={branchSelectorRef}
+                className="min-w-0"
+                readOnly={!worktreeChecked}
+                environmentId={environmentId}
+                threadId={threadId}
+                {...(draftId ? { draftId } : {})}
+                envLocked={envLocked}
+                effectiveEnvModeOverride={effectiveEnvMode}
+                startFromOrigin={startFromOrigin}
+                onStartFromOriginChange={onStartFromOriginChange}
+                {...(onCheckoutPullRequestRequest ? { onCheckoutPullRequestRequest } : {})}
+                {...(onComposerFocusRequest ? { onComposerFocusRequest } : {})}
+              />
+            </span>
+          </>
         ) : null}
       </div>
     );

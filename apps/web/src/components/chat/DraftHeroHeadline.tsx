@@ -44,6 +44,40 @@ import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 // Menu value for "No project"; real entries are keyed by logical project key.
 const NO_PROJECT_VALUE = "no-project";
 
+// Retargets the open draft at `project` in place: the prompt stays in the same composer
+// session, and the model follows the project's default unless the user picked one.
+export function useSelectDraftProject(draftId: DraftId | null) {
+  const { environments } = useEnvironments();
+  const setLogicalProjectDraftThreadId = useComposerDraftStore(
+    (store) => store.setLogicalProjectDraftThreadId,
+  );
+  const getComposerDraft = useComposerDraftStore((store) => store.getComposerDraft);
+  const applyStickyState = useComposerDraftStore((store) => store.applyStickyState);
+  const setModelSelection = useComposerDraftStore((store) => store.setModelSelection);
+  return (project: ReturnType<typeof useProjects>[number], logicalProjectKey: string) => {
+    if (!draftId) return;
+    const currentDraft = getComposerDraft(draftId);
+    setLogicalProjectDraftThreadId(
+      logicalProjectKey,
+      scopeProjectRef(project.environmentId, project.id),
+      draftId,
+    );
+    if (!hasExplicitComposerModelSelection(currentDraft)) {
+      applyStickyState(draftId);
+      const environmentSettings = environments.find(
+        (environment) => environment.environmentId === project.environmentId,
+      )?.serverConfig?.settings;
+      const defaultModelSelection = environmentSettings
+        ? resolveProjectSettings(environmentSettings, project.id, project).settings
+            .defaultModelSelection
+        : project.defaultModelSelection;
+      if (defaultModelSelection) {
+        setModelSelection(draftId, defaultModelSelection, { replaceOptions: true });
+      }
+    }
+  };
+}
+
 interface DraftHeroHeadlineProps {
   readonly draftId: DraftId | null;
   readonly activeProjectRef: ScopedProjectRef | null;
@@ -61,12 +95,7 @@ export function DraftHeroHeadline({
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const projectSortOrder = useClientSettings((settings) => settings.sidebarProjectSortOrder);
-  const setLogicalProjectDraftThreadId = useComposerDraftStore(
-    (store) => store.setLogicalProjectDraftThreadId,
-  );
-  const getComposerDraft = useComposerDraftStore((store) => store.getComposerDraft);
-  const applyStickyState = useComposerDraftStore((store) => store.applyStickyState);
-  const setModelSelection = useComposerDraftStore((store) => store.setModelSelection);
+  const selectDraftProject = useSelectDraftProject(draftId);
   const openAddProject = useCallback(() => openCommandPalette({ open: "add-project" }), []);
   const { scratchEnvironmentId, scratchWorkspaceRootFor, openScratchProject } = useScratchProject();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -184,27 +213,7 @@ export function DraftHeroHeadline({
       activeProjectKey: logicalProjectKey,
       scratchTargetEnvironmentId: project.environmentId,
     };
-    const currentDraft = getComposerDraft(draftId);
-    setLogicalProjectDraftThreadId(
-      logicalProjectKey,
-      scopeProjectRef(project.environmentId, project.id),
-      draftId,
-    );
-    if (!hasExplicitComposerModelSelection(currentDraft)) {
-      applyStickyState(draftId);
-      const environmentSettings = environments.find(
-        (environment) => environment.environmentId === project.environmentId,
-      )?.serverConfig?.settings;
-      const defaultModelSelection = environmentSettings
-        ? resolveProjectSettings(environmentSettings, project.id, project).settings
-            .defaultModelSelection
-        : project.defaultModelSelection;
-      if (defaultModelSelection) {
-        setModelSelection(draftId, defaultModelSelection, {
-          replaceOptions: true,
-        });
-      }
-    }
+    selectDraftProject(project, logicalProjectKey);
   };
   const startScratch = async (): Promise<boolean> => {
     if (scratchTargetEnvironmentId === null || isScratchDraft) {

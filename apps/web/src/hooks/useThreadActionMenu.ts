@@ -9,6 +9,7 @@ import {
 import { canSnooze, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import {
   AuthOrchestrationOperateScope,
+  AuthSourceControlWriteScope,
   type ScopedThreadRef,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -46,6 +47,7 @@ import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
 import { useCopyToClipboard } from "./useCopyToClipboard";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { useClientSettings } from "./useSettings";
+import { readProjectGitBranch, useForkThread } from "./useForkThread";
 import { useThreadActions } from "./useThreadActions";
 
 function failureToast(title: string, error: unknown) {
@@ -73,8 +75,10 @@ export function useThreadActionMenu(input: {
   /** Fallback for "Copy path" when the thread has no worktree. */
   readonly projectCwd: string | null;
   readonly onStartRename: () => void;
+  /** Runs before "Project settings" leaves the page, e.g. to close a mobile sidebar. */
+  readonly onOpenProjectSettings?: () => void;
 }) {
-  const { threadRef, projectCwd, onStartRename } = input;
+  const { threadRef, projectCwd, onStartRename, onOpenProjectSettings } = input;
   const router = useRouter();
   const projects = useProjects();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -104,6 +108,7 @@ export function useThreadActionMenu(input: {
     reportFailure: false,
   });
   const handleNewThread = useNewThreadHandler();
+  const forkThread = useForkThread();
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
@@ -137,6 +142,26 @@ export function useThreadActionMenu(input: {
         // what the user is looking at.
         const thread = readThreadShell(threadRef);
         if (!thread) return;
+        const project = projects.find(
+          (candidate) =>
+            candidate.environmentId === thread.environmentId && candidate.id === thread.projectId,
+        );
+        // Latest stable fork works while a run is in flight (it forks the last
+        // completed turn); it needs at least one run, and the server still has
+        // the last word (it wants a completed, checkpointed run).
+        const canFork = thread.latestRun !== null;
+        // A thread with a branch is in a git project already; only ask git for
+        // the project's branch (which can time out before status loads) without one.
+        const canCreateWorktree =
+          project !== undefined &&
+          readEnvironmentScope(threadRef.environmentId, AuthSourceControlWriteScope);
+        const projectGit =
+          canCreateWorktree && thread.branch === null
+            ? await readProjectGitBranch(threadRef.environmentId, project.workspaceRoot)
+            : null;
+        const worktreeBaseBranch = canCreateWorktree
+          ? (thread.branch ?? (projectGit?.isRepo ? projectGit.refName : null))
+          : null;
         const now = new Date();
         const supports = {
           settlement: readEnvironmentSupportsSettlement(threadRef.environmentId),
@@ -160,6 +185,7 @@ export function useThreadActionMenu(input: {
           isRunning: !threadRuntimeCanArchive(thread.runtime),
           supports,
           snoozePresets,
+          fork: { canFork, worktreeBaseBranch },
         });
         const clicked = await settlePromise(() => api.contextMenu.show(items, position));
         if (clicked._tag === "Failure" || clicked.value === null) return;
@@ -197,15 +223,11 @@ export function useThreadActionMenu(input: {
         };
         switch (action) {
           case "project-settings": {
-            const project = projects.find(
-              (candidate) =>
-                candidate.environmentId === thread.environmentId &&
-                candidate.id === thread.projectId,
-            );
             if (!project) return;
             const projectKey =
               logicalProjectKeyByPhysicalKey.get(derivePhysicalProjectKey(project)) ??
               deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings);
+            onOpenProjectSettings?.();
             void router.navigate({
               to: "/projects/$projectKey",
               params: { projectKey },
@@ -252,6 +274,23 @@ export function useThreadActionMenu(input: {
             return;
           case "rename":
             onStartRename();
+            return;
+          case "fork-here":
+          case "fork-in-worktree":
+            await forkThread({
+              environmentId: threadRef.environmentId,
+              sourceThreadId: threadRef.threadId,
+              title: `${thread.title} fork`,
+              projectCwd: project?.workspaceRoot,
+              ...(action === "fork-in-worktree" && worktreeBaseBranch
+                ? { newWorktree: { baseBranch: worktreeBaseBranch } }
+                : {}),
+              reportError: (message) =>
+                failureToast(
+                  "Failed to fork thread",
+                  new Error(message ?? "Could not fork this thread."),
+                ),
+            });
             return;
           case "regenerate-title":
             if (isRegeneratingTitle) return;
@@ -349,9 +388,11 @@ export function useThreadActionMenu(input: {
       copyPathToClipboard,
       copyThreadIdToClipboard,
       deleteThread,
+      forkThread,
       handleNewThread,
       logicalProjectKeyByPhysicalKey,
       markThreadUnread,
+      onOpenProjectSettings,
       onStartRename,
       pinThread,
       projectCwd,

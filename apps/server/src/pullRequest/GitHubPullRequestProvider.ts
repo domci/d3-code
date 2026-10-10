@@ -382,6 +382,9 @@ export const make = Effect.gen(function* () {
         Effect.mapError(fail("getChangeRequestChecks")),
       ),
 
+    getMergeCommitChecks: (input) =>
+      cli.getMergeCommitChecks(input).pipe(Effect.mapError(fail("getMergeCommitChecks"))),
+
     getChangeRequest: (input) =>
       readChecks(input).pipe(
         Effect.map((pullRequest): ProviderChangeRequestDetail => ({

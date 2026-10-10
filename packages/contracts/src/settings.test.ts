@@ -610,8 +610,20 @@ describe("ClientSettings environment identification", () => {
 });
 
 describe("ClientSettings sidebar", () => {
-  it("defaults to the current sidebar", () => {
-    expect(decodeClientSettings({}).legacySidebarEnabled).toBe(false);
+  it("defaults to stable manual project and session order, and honors stored values", () => {
+    const defaults = decodeClientSettings({});
+    expect(defaults.sidebarProjectSortOrder).toBe("manual");
+    expect(defaults.sidebarThreadSortOrder).toBe("manual");
+    const stored = decodeClientSettings({
+      sidebarProjectSortOrder: "updated_at",
+      sidebarThreadSortOrder: "created_at",
+    });
+    expect(stored.sidebarProjectSortOrder).toBe("updated_at");
+    expect(stored.sidebarThreadSortOrder).toBe("created_at");
+  });
+
+  it("defaults to the per-project tree sidebar", () => {
+    expect(decodeClientSettings({}).legacySidebarEnabled).toBe(true);
   });
 
   it("drops the retired sidebar v2 beta keys, resetting everyone to the default", () => {
@@ -619,7 +631,7 @@ describe("ClientSettings sidebar", () => {
       sidebarV2Enabled: false,
       sidebarV2ConfiguredByUser: true,
     });
-    expect(decoded.legacySidebarEnabled).toBe(false);
+    expect(decoded.legacySidebarEnabled).toBe(true);
     expect(decoded).not.toHaveProperty("sidebarV2Enabled");
     expect(decoded).not.toHaveProperty("sidebarV2ConfiguredByUser");
   });
@@ -632,7 +644,8 @@ describe("ClientSettings sidebar", () => {
     expect(decodeClientSettingsPatch(stored)).toEqual({});
   });
 
-  it("preserves an explicit legacy sidebar opt-in", () => {
+  it("preserves an explicit legacy sidebar choice", () => {
+    expect(decodeClientSettings({ legacySidebarEnabled: false }).legacySidebarEnabled).toBe(false);
     expect(decodeClientSettings({ legacySidebarEnabled: true }).legacySidebarEnabled).toBe(true);
     expect(decodeClientSettingsPatch({ legacySidebarEnabled: true }).legacySidebarEnabled).toBe(
       true,
@@ -1092,10 +1105,10 @@ it("validates remote device hosts and rejects ambiguous host ids", () => {
 });
 
 describe("branch naming settings", () => {
-  it("defaults existing settings to the t3 static prefix", () => {
+  it("defaults existing settings to the d3 static prefix", () => {
     expect(decodeServerSettings({})).toMatchObject({
       branchNamingMode: "static",
-      branchNamePrefix: "t3",
+      branchNamePrefix: "d3",
       branchNameInstructions: "",
     });
   });

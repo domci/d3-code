@@ -246,7 +246,7 @@ import {
   RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY,
   type ThreadPanelPresentation,
 } from "../rightPanelLayout";
-import { PopoverCreateHandle } from "./ui/popover";
+import { Popover, PopoverCreateHandle, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import {
   pullRequestSurface,
   selectActiveRightPanel,
@@ -566,6 +566,7 @@ import { fileAttachmentCapabilityBlockReason } from "./chat/composerAttachmentFi
 import { assetEnvironment } from "../state/assets";
 import { readEnvironmentScope, readPreparedConnection } from "../state/session";
 import { useAtomCommand } from "../state/use-atom-command";
+import { useForkThread } from "../hooks/useForkThread";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { Button, InlineButton } from "./ui/button";
@@ -1649,9 +1650,6 @@ export default function ChatView(props: ChatViewProps) {
     reportFailure: false,
   });
   const revertThreadCheckpoint = useOrchestrationCommand(threadEnvironment.revertCheckpoint, {
-    reportFailure: false,
-  });
-  const forkThreadFromRun = useAtomCommand(threadEnvironment.forkFromRun, {
     reportFailure: false,
   });
   const openPreview = useAtomCommand(previewEnvironment.open, { reportFailure: false });
@@ -4269,22 +4267,33 @@ export default function ChatView(props: ChatViewProps) {
           providerSubagentModels,
           reportedModelSelection,
         );
-  const mountComposerContextStrip = shouldShowComposerContextStrip({
-    isDraftHeroState,
-    persistInActiveThreads: settings.persistComposerContextStrip,
-    hasActiveProject: activeProject !== null && !showProviderSubagentBar,
-    isGitRepo,
-    showEnvironmentIndicator: showComposerEnvironmentIndicator,
-    hostsRestingComposerControls: routeKind === "server",
-  });
-  const showComposerContextStrip = shouldShowComposerContextStrip({
-    isDraftHeroState,
-    persistInActiveThreads: settings.persistComposerContextStrip,
-    hasActiveProject: activeProject !== null && !showProviderSubagentBar,
-    isGitRepo,
-    showEnvironmentIndicator: showComposerEnvironmentIndicator,
-    hostsRestingComposerControls: routeKind === "server" && restingComposerControlsVisible,
-  });
+  // Drafts show their environment, project and branch choices as a chip row above the input
+  // instead of the strip below it.
+  const mountDraftContextChips =
+    routeKind === "draft" &&
+    activeProject !== null &&
+    !showProviderSubagentBar &&
+    (isDraftHeroState || settings.persistComposerContextStrip);
+  const mountComposerContextStrip =
+    routeKind !== "draft" &&
+    shouldShowComposerContextStrip({
+      isDraftHeroState,
+      persistInActiveThreads: settings.persistComposerContextStrip,
+      hasActiveProject: activeProject !== null && !showProviderSubagentBar,
+      isGitRepo,
+      showEnvironmentIndicator: showComposerEnvironmentIndicator,
+      hostsRestingComposerControls: routeKind === "server",
+    });
+  const showComposerContextStrip =
+    routeKind !== "draft" &&
+    shouldShowComposerContextStrip({
+      isDraftHeroState,
+      persistInActiveThreads: settings.persistComposerContextStrip,
+      hasActiveProject: activeProject !== null && !showProviderSubagentBar,
+      isGitRepo,
+      showEnvironmentIndicator: showComposerEnvironmentIndicator,
+      hostsRestingComposerControls: routeKind === "server" && restingComposerControlsVisible,
+    });
   const mountComposerModelStrip =
     routeKind === "server" && !mountComposerContextStrip && !showProviderSubagentBar;
   const showComposerModelStrip = mountComposerModelStrip && restingComposerControlsVisible;
@@ -7527,30 +7536,56 @@ export default function ChatView(props: ChatViewProps) {
           aria-hidden="true"
         />
       ),
-      title: presentation.title,
-      // A single named item is already in the title.
-      description:
-        presentation.items.length === 1 && presentation.items[0]?.childThreadId === undefined
-          ? undefined
-          : presentation.items.map((item, index) => {
-              const childThreadId = item.childThreadId;
-              return (
-                <Fragment key={item.taskId}>
-                  {index > 0 ? ", " : null}
-                  {childThreadId === undefined ? (
-                    item.label
-                  ) : (
-                    <InlineButton
-                      tone="muted"
-                      aria-label={`Open subagent ${item.label}`}
-                      onClick={() => onOpenRelatedThread(childThreadId)}
-                    >
-                      {item.label}
-                    </InlineButton>
-                  )}
-                </Fragment>
-              );
-            }),
+      // Subagents with a thread open it. Command and monitor tasks have no
+      // addressable timeline item, so they stay plain text.
+      title:
+        presentation.items.length > 1 ? (
+          <Popover>
+            <PopoverTrigger
+              render={
+                <InlineButton tone="muted" aria-label={`${presentation.title}, show tasks`} />
+              }
+            >
+              {presentation.title}
+            </PopoverTrigger>
+            <PopoverPopup
+              aria-label="Background tasks"
+              side="top"
+              className="max-w-[min(30rem,calc(100vw-2rem))]"
+            >
+              <ul className="flex flex-col gap-1 text-sm">
+                {presentation.items.map((item) => {
+                  const childThreadId = item.childThreadId;
+                  return (
+                    <li key={item.taskId} className="min-w-0">
+                      {childThreadId === undefined ? (
+                        <span className="block truncate text-muted-foreground">{item.label}</span>
+                      ) : (
+                        <InlineButton
+                          tone="muted"
+                          aria-label={`Open subagent ${item.label}`}
+                          onClick={() => onOpenRelatedThread(childThreadId)}
+                        >
+                          {item.label}
+                        </InlineButton>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </PopoverPopup>
+          </Popover>
+        ) : presentation.items[0]?.childThreadId !== undefined ? (
+          <InlineButton
+            tone="muted"
+            aria-label={`Open subagent ${presentation.items[0].label}`}
+            onClick={() => onOpenRelatedThread(presentation.items[0]!.childThreadId!)}
+          >
+            {presentation.title}
+          </InlineButton>
+        ) : (
+          presentation.title
+        ),
       actions: (
         <Button
           size="xs"
@@ -8561,51 +8596,44 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
 
+  const forkThread = useForkThread();
   const onForkFromRun = useCallback(
-    async (input: { readonly sourceThreadId: ThreadId; readonly runId: RunId }) => {
+    async (input: {
+      readonly sourceThreadId: ThreadId;
+      readonly runId: RunId;
+      readonly newWorktree?: { readonly baseBranch: string };
+    }) => {
       if (!activeThread || activeEnvironmentUnavailable) return;
-      const targetThreadId = newThreadId();
-      const targetThreadRef = scopeThreadRef(environmentId, targetThreadId);
-      const result = await forkThreadFromRun({
+      await forkThread({
         environmentId,
-        input: {
-          sourceThreadId: input.sourceThreadId,
-          targetThreadId,
-          runId: input.runId,
-          title: `${activeThread.title} fork`,
-        },
-      });
-      if (result._tag === "Failure") {
-        if (!isAtomCommandInterrupted(result)) {
-          const error = squashAtomCommandFailure(result);
-          setThreadError(
-            activeThread.id,
-            error instanceof Error ? error.message : "Failed to fork this response.",
-          );
-        }
-        return;
-      }
-      const targetThreadReady = await waitForThreadShell(targetThreadRef);
-      if (!targetThreadReady) {
-        setThreadError(
-          activeThread.id,
-          "The fork was created, but its thread data did not reach this client. Reconnect and try opening it from the sidebar.",
-        );
-        return;
-      }
-      await navigate({
-        to: "/$environmentId/$threadId",
-        params: buildThreadRouteParams(targetThreadRef),
+        sourceThreadId: input.sourceThreadId,
+        runId: input.runId,
+        title: `${activeThread.title} fork`,
+        ...(input.newWorktree ? { newWorktree: input.newWorktree } : {}),
+        projectCwd: activeProject?.workspaceRoot,
+        reportError: (message) =>
+          setThreadError(activeThread.id, message ?? "Failed to fork this response."),
       });
     },
     [
       activeEnvironmentUnavailable,
+      activeProject,
       activeThread,
       environmentId,
-      forkThreadFromRun,
-      navigate,
+      forkThread,
       setThreadError,
     ],
+  );
+  const gitStatusRefName = gitStatusQuery.data?.refName ?? null;
+  const forkWorktreeSource = useMemo(
+    () =>
+      isGitRepo && canWriteSourceControl && activeProject
+        ? {
+            cwd: activeProject.workspaceRoot,
+            defaultBaseBranch: activeThreadBranch ?? gitStatusRefName,
+          }
+        : null,
+    [activeProject, activeThreadBranch, canWriteSourceControl, gitStatusRefName, isGitRepo],
   );
   const onCompactContext = () => {
     if (compactDisabled) return;
@@ -10939,7 +10967,7 @@ export default function ChatView(props: ChatViewProps) {
     ) : renderedRightPanelSurface?.kind === "pull-request" && !supportsPullRequests ? (
       <PullRequestsUnavailableState
         title="Pull requests unavailable"
-        error="Update this environment's T3 Code server to browse pull requests."
+        error="Update this environment's D3 Code server to browse pull requests."
       />
     ) : renderedRightPanelSurface?.kind === "pull-request" ? (
       // No onClose: the surface tab's own X owns closing here, and a second X in the header
@@ -11177,6 +11205,46 @@ export default function ChatView(props: ChatViewProps) {
       <div className="pointer-events-auto flex h-full items-center">{panelToggleControls}</div>
     </div>
   );
+  const branchToolbar =
+    mountComposerContextStrip || mountDraftContextChips ? (
+      <BranchToolbar
+        layout={mountDraftContextChips ? "chips" : "composer"}
+        forceNewWorktree={multipleModelSelections !== null}
+        ref={branchToolbarRef}
+        environmentId={activeThread.environmentId}
+        threadId={activeThread.id}
+        showGitControls={isGitRepo}
+        {...(routeKind === "draft" && draftId ? { draftId } : {})}
+        onEnvModeChange={onEnvModeChange}
+        startFromOrigin={startFromOrigin}
+        onStartFromOriginChange={onStartFromOriginChange}
+        envMode={envMode}
+        {...(canOverrideServerThreadEnvMode
+          ? {
+              activeThreadBranchOverride: activeThreadBranch,
+              onActiveThreadBranchOverrideChange: setPendingServerThreadBranch,
+            }
+          : {})}
+        envLocked={envLocked}
+        onComposerFocusRequest={scheduleComposerFocus}
+        {...(canCheckoutPullRequestIntoThread
+          ? { onCheckoutPullRequestRequest: openPullRequestDialog }
+          : {})}
+        {...(hasMultipleEnvironments ? { onEnvironmentChange } : {})}
+        autoEnvironmentLabel={autoEnvironmentLabel}
+        onAutoEnvironment={
+          draftId &&
+          !envLocked &&
+          canAutoBalanceEnvironments &&
+          loadBalancingSettings.loadBalancingEnabled
+            ? onAutoEnvironment
+            : undefined
+        }
+        availableEnvironments={logicalProjectEnvironments}
+        composerControlsHostRef={setRestingComposerControlsHost}
+        contextStripVisible={showComposerContextStrip}
+      />
+    ) : null;
   const workspaceFileDropHandlers = makeWorkspaceFileDropHandlers({
     setDragActive: setIsWorkspaceFileDragActive,
     addFiles: (files) => composerRef.current?.addDroppedFiles(files),
@@ -11353,6 +11421,7 @@ export default function ChatView(props: ChatViewProps) {
                 onOpenThread={onOpenRelatedThread}
                 parentThreadLink={paintOnlyDisplayedTimeline ? null : parentThreadLink}
                 onForkFromRun={paintOnlyDisplayedTimeline ? async () => {} : onForkFromRun}
+                forkWorktreeSource={paintOnlyDisplayedTimeline ? null : forkWorktreeSource}
                 onRollbackCheckpoint={(input) => {
                   if (!paintOnlyDisplayedTimeline) void onRollbackCheckpoint(input);
                 }}
@@ -11475,6 +11544,9 @@ export default function ChatView(props: ChatViewProps) {
                         : undefined
                     }
                   >
+                    {mountDraftContextChips ? (
+                      <div className="pointer-events-auto">{branchToolbar}</div>
+                    ) : null}
                     <ComposerSurface.Shell
                       contextStrip={showComposerContextStrip || showComposerModelStrip}
                     >
@@ -11707,45 +11779,7 @@ export default function ChatView(props: ChatViewProps) {
                             </ComposerSurface.ContextStrip>
                           ) : null}
                           {mountComposerContextStrip && (
-                            <div className="pointer-events-auto">
-                              <BranchToolbar
-                                forceNewWorktree={multipleModelSelections !== null}
-                                ref={branchToolbarRef}
-                                environmentId={activeThread.environmentId}
-                                threadId={activeThread.id}
-                                showGitControls={isGitRepo}
-                                {...(routeKind === "draft" && draftId ? { draftId } : {})}
-                                onEnvModeChange={onEnvModeChange}
-                                startFromOrigin={startFromOrigin}
-                                onStartFromOriginChange={onStartFromOriginChange}
-                                envMode={envMode}
-                                {...(canOverrideServerThreadEnvMode
-                                  ? {
-                                      activeThreadBranchOverride: activeThreadBranch,
-                                      onActiveThreadBranchOverrideChange:
-                                        setPendingServerThreadBranch,
-                                    }
-                                  : {})}
-                                envLocked={envLocked}
-                                onComposerFocusRequest={scheduleComposerFocus}
-                                {...(canCheckoutPullRequestIntoThread
-                                  ? { onCheckoutPullRequestRequest: openPullRequestDialog }
-                                  : {})}
-                                {...(hasMultipleEnvironments ? { onEnvironmentChange } : {})}
-                                autoEnvironmentLabel={autoEnvironmentLabel}
-                                onAutoEnvironment={
-                                  draftId &&
-                                  !envLocked &&
-                                  canAutoBalanceEnvironments &&
-                                  loadBalancingSettings.loadBalancingEnabled
-                                    ? onAutoEnvironment
-                                    : undefined
-                                }
-                                availableEnvironments={logicalProjectEnvironments}
-                                composerControlsHostRef={setRestingComposerControlsHost}
-                                contextStripVisible={showComposerContextStrip}
-                              />
-                            </div>
+                            <div className="pointer-events-auto">{branchToolbar}</div>
                           )}
                         </div>
                       </div>

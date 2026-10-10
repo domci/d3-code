@@ -1,12 +1,19 @@
-import { ArrowLeftIcon, ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  ChartNoAxesColumnIcon,
+  KanbanIcon,
+  MoonIcon,
+  SettingsIcon,
+  SunIcon,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { memo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
+import { useTheme } from "../../hooks/useTheme";
 import { cn } from "../../lib/utils";
 import { usePullRequestsSupported } from "../../state/environments";
-import { T3Wordmark } from "../T3Wordmark";
 import {
   resolveEnvironmentIdentificationPillLabel,
   resolveSidebarStageBackdropVariant,
@@ -14,6 +21,7 @@ import {
   useEnvironmentStageLabel,
 } from "../SidebarStageBackdrop";
 import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
 import {
   SidebarFooter,
   SidebarMenu,
@@ -72,9 +80,36 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
           </div>
         ) : null}
       </div>
+      <div className="relative z-10 shrink-0 [-webkit-app-region:no-drag]">
+        <ThemeToggle />
+      </div>
     </div>
   );
 });
+
+/** Always-visible light/dark switch in the sidebar titlebar. */
+function ThemeToggle() {
+  const { resolvedTheme, setAppearanceMode } = useTheme();
+  const next = resolvedTheme === "dark" ? "light" : "dark";
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            size="icon-xs"
+            variant="ghost"
+            aria-label={`Switch to ${next} mode`}
+            onClick={() => setAppearanceMode(next)}
+          />
+        }
+      >
+        {resolvedTheme === "dark" ? <SunIcon /> : <MoonIcon />}
+      </TooltipTrigger>
+      <TooltipPopup side="bottom">Switch to {next} mode</TooltipPopup>
+    </Tooltip>
+  );
+}
 
 // Measures the brand at its titlebar inset, plus the header's right padding and the
 // sidebar border, so the sidebar minimum follows font size, zoom and macOS window controls.
@@ -126,7 +161,9 @@ function SidebarBrandMark({ onBackdrop }: { onBackdrop: boolean }) {
   return (
     // Center the visible capitals, without the font's ascender/descender space.
     <span className="inline-flex min-w-0 items-baseline gap-1 text-sm font-medium tracking-tight">
-      <T3Wordmark aria-label="T3" className="h-[1cap] w-auto shrink-0" />
+      <span aria-label="D3" className="shrink-0 font-semibold">
+        D3
+      </span>
       <span
         className={cn(
           "truncate [text-box:trim-both_cap_alphabetic]",
@@ -184,6 +221,10 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
       search: readPullRequestListPreferences(),
     });
   }, [closeMobileSidebar, navigate]);
+  const handleBoardClick = useCallback(() => {
+    closeMobileSidebar();
+    void navigate({ to: "/board" });
+  }, [closeMobileSidebar, navigate]);
   const handleSettingsClick = useCallback(() => {
     closeMobileSidebar();
     void navigate({ to: "/settings" });
@@ -224,6 +265,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
               onClick={handlePullRequestsClick}
             />
           ) : null}
+          <SidebarUtilityItem icon={<KanbanIcon />} label="Board" onClick={handleBoardClick} />
           <SidebarUtilityItem
             icon={<ChartNoAxesColumnIcon />}
             label="Usage"

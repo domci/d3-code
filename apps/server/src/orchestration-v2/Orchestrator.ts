@@ -100,6 +100,7 @@ import {
   type ProjectionRecordFilter,
   type ProjectionRecords,
   type ProjectionCheckpointContext,
+  type ProjectionThreadProviderContext,
 } from "./ProjectionStore.ts";
 import type { ProviderAdapterV2Shape } from "./ProviderAdapter.ts";
 import { ProviderAdapterRegistryV2 } from "./ProviderAdapterRegistry.ts";
@@ -480,6 +481,20 @@ function pendingThreadTitleGenerationEffect(
   };
 }
 
+/** Re-applies the thread's title and settled state to the provider's own conversation. */
+function pendingProviderNativeSyncEffect(
+  commandId: CommandId,
+  threadId: ThreadId,
+  aspects: ReadonlyArray<"title" | "archive">,
+): PendingOrchestrationEffectV2 {
+  return {
+    id: `effect:${commandId}:provider-native.sync`,
+    commandId,
+    threadId,
+    request: { type: "provider-native.sync", aspects },
+  };
+}
+
 const WORKSPACE_PREPARATION_INPUT = "Preparing workspace";
 
 /** A reopened preparation item drops the output and exit code of the attempt it replaces. */
@@ -517,6 +532,30 @@ function withPullRequestWatch(
 ): ThreadPullRequestLink {
   const { watch: _previous, ...rest } = link;
   return watch === undefined ? rest : { ...rest, watch };
+}
+
+/**
+ * Settling is "I'm done with this": it clears a pin the same way it parks the
+ * thread (mirrors the v1 decider's settle/pin exclusion).
+ */
+function settledThread(
+  thread: OrchestrationV2AppThread,
+  now: DateTime.Utc,
+  settledAt: DateTime.Utc | undefined,
+): OrchestrationV2AppThread {
+  const alreadySettled =
+    thread.settledOverride === "settled" && thread.settledAt !== null && thread.pinnedAt == null;
+  return {
+    ...thread,
+    settledOverride: "settled",
+    settledAt: alreadySettled ? thread.settledAt : (settledAt ?? now),
+    pullRequests: thread.pullRequests?.map((link) => withPullRequestWatch(link, undefined)),
+    unsettledAt: null,
+    pinnedAt: null,
+    pinOrderKey: null,
+    activeOrderKey: null,
+    updatedAt: alreadySettled ? thread.updatedAt : now,
+  };
 }
 
 /** A legacy single-PR link as a link entry. Re-linking a pull request keeps its watch. */
@@ -2562,9 +2601,23 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     if (command.type === "thread.settle") {
       const projection = yield* loadProjectionForCommand(
         command,
-        ["runs", "runtimeRequests", "messages"],
-        { turnItemTypes: [], messageRoles: ["user"] },
+        ["runs", "runtimeRequests", "messages", "providerThreads", "turnItems"],
+        {
+          turnItemTypes: ["subagent"],
+          turnItemStatuses: ["pending", "running", "waiting"],
+          messageRoles: ["user"],
+        },
       );
+      // A run draining after its turn ended (waiting) that only waits on its
+      // subagents is not the user's work in flight: settling stops those
+      // subagents below, so they must not block it. A running turn still does.
+      const waitsOnlyOnSubagents = derivePendingBackgroundWork({
+        latestRun: projection.runs.findLast((run) => run.status !== "queued"),
+        providerThreads: projection.providerThreads,
+        turnItems: projection.turnItems,
+        activeProviderThreadId: projection.thread.activeProviderThreadId,
+        runs: projection.runs,
+      }).some((task) => task.kind === "subagent");
       // Queued notification and delegated-completion runs only wake the agent.
       // They are not user messages and are hidden from the queue UI, so they
       // must not block settling; they are cancelled below instead.
@@ -2582,7 +2635,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const activeRunExists = projection.runs.some(
         (run) =>
           ["preparing", "queued", "starting", "running", "waiting"].includes(run.status) &&
-          !automaticQueuedRuns.includes(run),
+          !automaticQueuedRuns.includes(run) &&
+          !(run.status === "waiting" && waitsOnlyOnSubagents),
       );
       const pendingRequests = projection.runtimeRequests.filter(
         (request) => request.status === "pending",
@@ -2760,24 +2814,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           };
         case "thread.unarchive":
           return { ...thread, archivedAt: null, updatedAt: now };
-        case "thread.settle": {
-          // Settling is "I'm done with this": it clears a pin the same way it
-          // parks the thread (mirrors the v1 decider's settle/pin exclusion).
-          const wasPinned = thread.pinnedAt != null;
-          const alreadySettled =
-            thread.settledOverride === "settled" && thread.settledAt !== null && !wasPinned;
-          return {
-            ...thread,
-            settledOverride: "settled",
-            settledAt: alreadySettled ? thread.settledAt : (command.settledAt ?? now),
-            pullRequests: thread.pullRequests?.map((link) => withPullRequestWatch(link, undefined)),
-            unsettledAt: null,
-            pinnedAt: null,
-            pinOrderKey: null,
-            activeOrderKey: null,
-            updatedAt: alreadySettled ? thread.updatedAt : now,
-          };
-        }
+        case "thread.settle":
+          return settledThread(thread, now, command.settledAt);
         case "thread.unsettle": {
           const alreadyPinnedActive = thread.settledOverride === "active";
           return {
@@ -3215,6 +3253,32 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       payload: updatedThread,
     });
 
+    const nativeSyncAspects: Array<"title" | "archive"> = [];
+    if (
+      (command.type === "thread.metadata.update" ||
+        command.type === "thread.title.regeneration.complete") &&
+      command.title !== undefined &&
+      updatedThread.title !== thread.title
+    ) {
+      nativeSyncAspects.push("title");
+    }
+    if (
+      command.type === "thread.settle" ||
+      command.type === "thread.unsettle" ||
+      command.type === "thread.archive" ||
+      command.type === "thread.unarchive" ||
+      // Pinning a settled thread promotes it back to active.
+      (command.type === "thread.pin" && thread.settledOverride === "settled")
+    ) {
+      nativeSyncAspects.push("archive");
+    }
+    if (nativeSyncAspects.length > 0) {
+      yield* Ref.update(effects, (existing) => [
+        ...existing,
+        pendingProviderNativeSyncEffect(command.commandId, command.threadId, nativeSyncAspects),
+      ]);
+    }
+
     if (command.type === "thread.metadata.update" && command.regenerateTitle === true) {
       yield* Ref.update(effects, (existing) => [
         ...existing,
@@ -3318,58 +3382,34 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       yield* Effect.forEach(
         liveSessions,
         (session) =>
-          Effect.gen(function* () {
-            yield* emit(
-              events,
-              command,
-            )({
-              type: "provider-session.detached",
-              threadId: command.threadId,
-              driver: session.driver,
-              providerInstanceId: session.providerInstanceId,
-              occurredAt: now,
-              payload: {
-                providerSessionId: session.id,
-                detachedAt: now,
-                reason:
-                  command.type === "thread.archive"
-                    ? "Thread archived."
-                    : command.type === "thread.settle"
-                      ? "Thread settled."
-                      : command.type === "thread.metadata.update"
-                        ? "Workspace changed."
-                        : command.type === "thread.runtime-mode.set"
-                          ? "Runtime mode changed."
-                          : "Provider or model selection changed.",
-              },
-            });
-            const pendingEffect = {
-              id: `effect:${command.commandId}:provider-session.detach:${session.id}`,
-              commandId: command.commandId,
-              threadId: command.threadId,
-              request: {
-                type: "provider-session.detach",
-                providerSessionId: session.id,
-                detail:
-                  command.type === "thread.archive"
-                    ? "Thread archived."
-                    : command.type === "thread.settle"
-                      ? "Thread settled."
-                      : command.type === "thread.metadata.update"
-                        ? "Workspace changed."
-                        : command.type === "thread.runtime-mode.set"
-                          ? "Runtime mode changed."
-                          : "Provider or model selection changed.",
-                // Terminal detaches revoke the thread's MCP credentials; other
-                // detach reasons keep them so a re-attaching provider process
-                // stays authorized.
-                ...(command.type === "thread.archive" ? { revokeMcpCredential: true } : {}),
-              },
-            } satisfies PendingOrchestrationEffectV2;
-            yield* Ref.update(effects, (existing) => [...existing, pendingEffect]);
+          emitProviderSessionDetach({
+            command,
+            events,
+            effects,
+            threadId: command.threadId,
+            session,
+            reason:
+              command.type === "thread.archive"
+                ? "Thread archived."
+                : command.type === "thread.settle"
+                  ? "Thread settled."
+                  : command.type === "thread.metadata.update"
+                    ? "Workspace changed."
+                    : command.type === "thread.runtime-mode.set"
+                      ? "Runtime mode changed."
+                      : "Provider or model selection changed.",
+            // Terminal detaches revoke the thread's MCP credentials; other
+            // detach reasons keep them so a re-attaching provider process
+            // stays authorized.
+            revokeMcpCredential: command.type === "thread.archive",
+            now,
           }),
         { concurrency: 1, discard: true },
       );
+    }
+
+    if (command.type === "thread.settle") {
+      yield* settleSubagentDescendants(command, events, effects, now);
     }
 
     if (command.type === "thread.archive") {
@@ -3384,6 +3424,160 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       ]);
     }
   });
+
+  /**
+   * A user settling a thread also settles every subagent under it (children,
+   * grandchildren, ...), running or not, in the same transaction: no client or
+   * MCP caller can leave a settled parent with live orphans, and a settled
+   * child stays settled when its turn ends late, because only a user message
+   * or an explicit un-settle clears the override. What cannot be decided here
+   * (interrupting the children's provider turns) follows after commit as
+   * `delegated-tasks.stop`, the Stop cascade; a child's provider session is
+   * detached here, so a turn that Stop cannot reach is ended with its process.
+   */
+  const settleSubagentDescendants = Effect.fn("orchestrationV2.settleSubagentDescendants")(
+    function* (
+      command: Extract<OrchestrationV2Command, { readonly type: "thread.settle" }>,
+      events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+      effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
+      now: DateTime.Utc,
+    ) {
+      const mapProjection = (threadId: ThreadId) =>
+        Effect.mapError((cause: unknown) => new OrchestratorProjectionError({ threadId, cause }));
+      const seen = new Set<ThreadId>([command.threadId]);
+      const queue: Array<ThreadId> = [command.threadId];
+      const descendants: Array<ThreadId> = [];
+      for (let parentId = queue.shift(); parentId !== undefined; parentId = queue.shift()) {
+        const { subagents } = yield* projectionStore
+          .getThreadRecords(parentId, ["subagents"])
+          .pipe(mapProjection(parentId));
+        for (const task of subagents) {
+          const childId = task.childThreadId;
+          if (childId == null || seen.has(childId)) continue;
+          seen.add(childId);
+          queue.push(childId);
+          const child = yield* projectionStore.getThread(childId).pipe(mapProjection(childId));
+          if (child.lineage.relationshipToParent !== "subagent") continue;
+          descendants.push(childId);
+        }
+      }
+      if (descendants.length === 0) return;
+
+      for (const childId of descendants) {
+        const child = yield* projectionStore.getThread(childId).pipe(mapProjection(childId));
+        if (child.archivedAt !== null || child.deletedAt !== null) continue;
+        const records = yield* projectionStore
+          .getThreadRecords(childId, ["runs", "runtimeRequests"], {
+            turnItemTypes: [],
+            messageRoles: ["user"],
+          })
+          .pipe(mapProjection(childId));
+        // A settled thread keeps no actionable question or queued message.
+        for (const request of records.runtimeRequests.filter(
+          (candidate) => candidate.status === "pending",
+        )) {
+          yield* dispatchRuntimeRequestRespond(
+            {
+              type: "runtime-request.respond",
+              commandId: command.commandId,
+              threadId: childId,
+              requestId: request.id,
+              decision: "cancel",
+            },
+            events,
+            effects,
+          );
+        }
+        for (const run of records.runs.filter((candidate) => candidate.status === "queued")) {
+          yield* dispatchQueuedRunCancel(
+            {
+              type: "queued-run.cancel",
+              commandId: command.commandId,
+              threadId: childId,
+              runId: run.id,
+            },
+            events,
+          );
+        }
+        yield* emit(
+          events,
+          command,
+        )({
+          type: "thread.settled",
+          threadId: childId,
+          providerInstanceId: child.providerInstanceId,
+          occurredAt: now,
+          payload: settledThread(child, now, command.settledAt),
+        });
+        const providerContext = yield* projectionStore
+          .getThreadProviderContext(childId)
+          .pipe(mapProjection(childId));
+        for (const session of providerContext.providerSessions) {
+          if (session.status === "stopped" || session.status === "error") continue;
+          yield* emitProviderSessionDetach({
+            command,
+            events,
+            effects,
+            threadId: childId,
+            session,
+            reason: "Parent thread settled.",
+            revokeMcpCredential: false,
+            now,
+          });
+        }
+      }
+      yield* Ref.update(effects, (existing) => [
+        ...existing,
+        {
+          id: `effect:${command.commandId}:delegated-tasks.stop`,
+          commandId: command.commandId,
+          threadId: command.threadId,
+          request: { type: "delegated-tasks.stop", reason: "Parent thread settled." },
+        } satisfies PendingOrchestrationEffectV2,
+      ]);
+    },
+  );
+
+  /** Detaches one live provider session: the event now, the process stop after commit. */
+  const emitProviderSessionDetach = Effect.fn("orchestrationV2.emitProviderSessionDetach")(
+    function* (input: {
+      readonly command: OrchestrationV2ServerCommand;
+      readonly events: Ref.Ref<Array<OrchestrationV2DomainEvent>>;
+      readonly effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>;
+      readonly threadId: ThreadId;
+      readonly session: ProjectionThreadProviderContext["providerSessions"][number];
+      readonly reason: string;
+      readonly revokeMcpCredential: boolean;
+      readonly now: DateTime.Utc;
+    }) {
+      const { command, session, now } = input;
+      yield* emit(
+        input.events,
+        command,
+      )({
+        type: "provider-session.detached",
+        threadId: input.threadId,
+        driver: session.driver,
+        providerInstanceId: session.providerInstanceId,
+        occurredAt: now,
+        payload: { providerSessionId: session.id, detachedAt: now, reason: input.reason },
+      });
+      yield* Ref.update(input.effects, (existing) => [
+        ...existing,
+        {
+          id: `effect:${command.commandId}:provider-session.detach:${session.id}`,
+          commandId: command.commandId,
+          threadId: input.threadId,
+          request: {
+            type: "provider-session.detach",
+            providerSessionId: session.id,
+            detail: input.reason,
+            ...(input.revokeMcpCredential ? { revokeMcpCredential: true } : {}),
+          },
+        } satisfies PendingOrchestrationEffectV2,
+      ]);
+    },
+  );
 
   const dispatchProviderSessionDetach = Effect.fn("orchestrationV2.dispatch.providerSessionDetach")(
     function* (
@@ -4558,6 +4752,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           occurredAt: now,
           payload: thread,
         });
+        // No native sync here: the turn this message starts resumes the provider thread, and
+        // Codex unarchives on resume. A sync would also race that turn for its session.
         projection = yield* getProjectionWithPendingEvents(command.threadId, events);
       }
       if (projection.thread.snoozedUntil != null) {

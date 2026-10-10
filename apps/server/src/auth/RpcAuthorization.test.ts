@@ -1,5 +1,6 @@
 import {
   AuthEnvironmentMaintainScope,
+  clientRpcRequiredScopes,
   AuthDiagnosticsReadScope,
   AuthFilesystemReadScope,
   AuthProvidersManageScope,
@@ -73,6 +74,15 @@ describe("RPC authorization scopes", () => {
     );
   });
 
+  it("requires permission to operate on a thread before running its worktree setup script", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.threadRunWorktreeSetup)).toBe(
+      AuthOrchestrationOperateScope,
+    );
+    expect(clientRpcRequiredScopes(WS_METHODS.threadRunWorktreeSetup, {})).toEqual([
+      AuthOrchestrationOperateScope,
+    ]);
+  });
+
   it("requires write access to import agent session history", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.agentSessionsScan)).toBe(
       AuthOrchestrationReadScope,
@@ -138,6 +148,15 @@ describe("RPC authorization scopes", () => {
       AuthOrchestrationReadScope,
     );
     expect(requiredScopeForRpcMethod(WS_METHODS.pullRequestsSetFilesViewed)).toBe(
+      AuthSourceControlWriteScope,
+    );
+  });
+
+  it("separates reading a project board from moving a card on it", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.sourceControlGetProjectBoard)).toBe(
+      AuthOrchestrationReadScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.sourceControlMoveProjectBoardItem)).toBe(
       AuthSourceControlWriteScope,
     );
   });

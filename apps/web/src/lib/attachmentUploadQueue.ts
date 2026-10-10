@@ -148,7 +148,7 @@ function deletePendingUpload(environmentId: EnvironmentId, attachmentId: string)
   });
 }
 
-function uploadBytes(input: {
+export function uploadBytes(input: {
   readonly url: string;
   readonly file: File;
   readonly mimeType: string;

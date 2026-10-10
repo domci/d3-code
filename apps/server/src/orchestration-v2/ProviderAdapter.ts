@@ -572,6 +572,23 @@ export interface ProviderAdapterV2SessionRuntime {
     readonly providerThread: OrchestrationV2ProviderThread;
     readonly reason?: string;
   }) => Effect.Effect<{ readonly feedbackId: string }, ProviderAdapterV2Error>;
+  /**
+   * Names the provider's own conversation so the vendor's apps list it by the
+   * thread's title. Absent means the driver has no supported naming mechanism.
+   */
+  readonly setThreadTitle?: (input: {
+    readonly providerThread: OrchestrationV2ProviderThread;
+    readonly title: string;
+  }) => Effect.Effect<void, ProviderAdapterV2Error>;
+  /**
+   * Archives or restores the provider's own conversation so settled work
+   * leaves the vendor's active lists. Absent means the driver has no
+   * supported archive mechanism.
+   */
+  readonly setThreadArchived?: (input: {
+    readonly providerThread: OrchestrationV2ProviderThread;
+    readonly archived: boolean;
+  }) => Effect.Effect<void, ProviderAdapterV2Error>;
   readonly rollbackThread: (
     input: ProviderAdapterV2RollbackThreadInput,
   ) => Effect.Effect<ProviderAdapterV2ThreadSnapshot, ProviderAdapterV2Error>;
@@ -587,6 +604,11 @@ export interface ProviderAdapterV2Shape {
     OrchestrationV2ProviderCapabilities,
     ProviderAdapterV2Error
   >;
+  /**
+   * Which of `setThreadTitle` / `setThreadArchived` the runtimes implement. Callers read it
+   * before opening a session, so a driver without them is never started just to find out.
+   */
+  readonly nativeThreadControls?: { readonly title?: boolean; readonly archive?: boolean };
   readonly planSelectionTransition: (
     input: ProviderSelectionTransitionInput,
   ) => Effect.Effect<ProviderSelectionTransitionPlan, ProviderAdapterV2Error>;

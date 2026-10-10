@@ -24,6 +24,7 @@ import { formatRelativeTimeLabel } from "~/timestampFormat";
 
 import { Button } from "../ui/button";
 import { PullRequestEditButton } from "./PullRequestEditButton";
+import { PullRequestFixMenu } from "./PullRequestFixMenu";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -465,6 +466,8 @@ export function PullRequestSummaryTab({
   pendingFinding,
   fixFindingLabel = "Fix in a thread",
   fixCheckLabel = "Fix",
+  fixCheckHere = false,
+  fixCheckNewDisabled = false,
   onFixFinding,
   onRefresh,
   onRefreshChecks = onRefresh,
@@ -480,7 +483,10 @@ export function PullRequestSummaryTab({
   pendingFinding?: string | null;
   fixFindingLabel?: string;
   fixCheckLabel?: string;
-  onFixFinding?: (finding: PullRequestFinding) => void;
+  /** Offer fixing a failing check in the thread this panel sits beside, as well as a new one. */
+  fixCheckHere?: boolean;
+  fixCheckNewDisabled?: boolean;
+  onFixFinding?: (finding: PullRequestFinding, where?: "here" | "new") => void;
   onRefresh: () => void;
   onRefreshChecks?: () => void;
 }) {
@@ -898,18 +904,18 @@ export function PullRequestSummaryTab({
                 {/* Only where there is something to fix. A passing check has no failure to
                       reproduce, and the button would be an invitation to waste a thread. */}
                 {onFixFinding && failing ? (
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    className="shrink-0"
+                  <PullRequestFixMenu
+                    render={<Button size="xs" variant="ghost" className="shrink-0" />}
+                    canFixHere={fixCheckHere}
+                    newDisabled={fixCheckNewDisabled}
                     disabled={pendingFinding !== null && pendingFinding !== undefined}
-                    onClick={() => onFixFinding(finding)}
+                    onFix={(where) => onFixFinding(finding, where)}
                   >
                     <HammerIcon className="size-3" />
                     {pendingFinding === pullRequestFindingKey(finding)
                       ? "Preparing..."
                       : fixCheckLabel}
-                  </Button>
+                  </PullRequestFixMenu>
                 ) : null}
               </div>
             );

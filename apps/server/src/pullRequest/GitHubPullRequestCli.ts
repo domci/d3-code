@@ -1,4 +1,5 @@
 import { removeAgentCredits } from "./mergeMessage.ts";
+import { makeMergeCommitChecksReader, type MergeCommitChecks } from "./mergeCommitChecks.ts";
 import { KnownWorkflowRuns, makeChecksRevalidator } from "./gitHubConditionalChecks.ts";
 import { runGitHubStackAction, type GitHubStackActionError } from "./githubStackActions.ts";
 import * as Cause from "effect/Cause";
@@ -546,6 +547,13 @@ export class GitHubPullRequestCli extends Context.Service<
     }) => Effect.Effect<GitHubPullRequestWatchFingerprint | null, GitHubPullRequestCliError>;
 
     readonly revalidateChecks: Effect.Success<typeof makeChecksRevalidator>;
+
+    /** The check runs on the pull request's merge commit, or null where it has none to read. */
+    readonly getMergeCommitChecks: (input: {
+      readonly host: string;
+      readonly repository: string;
+      readonly number: number;
+    }) => Effect.Effect<MergeCommitChecks | null, GitHubPullRequestCliError>;
 
     readonly getPullRequestDetail: (input: {
       readonly cwd: string;
@@ -1118,6 +1126,7 @@ export const make = Effect.gen(function* () {
   const vcsProcess = yield* VcsProcess.VcsProcess;
   const fileSystem = yield* FileSystem.FileSystem;
   const revalidateChecks = yield* makeChecksRevalidator;
+  const getMergeCommitChecks = yield* makeMergeCommitChecksReader;
   const routingIdentities = new Map<
     string,
     {
@@ -1890,6 +1899,7 @@ export const make = Effect.gen(function* () {
   return GitHubPullRequestCli.of({
     withVerifiedCredential,
     revalidateChecks,
+    getMergeCommitChecks,
     getRoutingIdentity,
     getViewerLogin: (input) =>
       getRoutingIdentity(input).pipe(Effect.map((identity) => identity.viewer)),

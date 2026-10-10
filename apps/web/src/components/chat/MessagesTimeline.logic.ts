@@ -563,6 +563,8 @@ type MessagesTimelineRowContent =
       durationStart: string;
       showAssistantMeta: boolean;
       showAssistantCopyButton: boolean;
+      /** Assistant message that is not the turn's last: gets a fork-only control. */
+      interimAssistant?: boolean;
       assistantCopyStreaming: boolean;
       assistantTurnDiffSummary?: TurnDiffSummary | undefined;
       revertTurnCount?: number | undefined;
@@ -1680,6 +1682,9 @@ export function deriveMessagesTimelineRows(input: {
       durationStart,
       showAssistantMeta,
       showAssistantCopyButton: showAssistantMeta,
+      interimAssistant:
+        timelineEntry.message.role === "assistant" &&
+        !terminalAssistantMessageIds.has(timelineEntry.message.id),
       assistantCopyStreaming: timelineEntry.message.streaming || assistantResponseStillInProgress,
       assistantTurnDiffSummary:
         timelineEntry.message.role === "assistant"
@@ -2094,6 +2099,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.durationStart === bm.durationStart &&
         a.showAssistantMeta === bm.showAssistantMeta &&
         a.showAssistantCopyButton === bm.showAssistantCopyButton &&
+        a.interimAssistant === bm.interimAssistant &&
         a.assistantCopyStreaming === bm.assistantCopyStreaming &&
         a.assistantTurnDiffSummary === bm.assistantTurnDiffSummary &&
         a.revertTurnCount === bm.revertTurnCount

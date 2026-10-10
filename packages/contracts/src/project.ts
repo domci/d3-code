@@ -10,10 +10,25 @@ import {
   NonNegativeInt,
   PositiveInt,
   ProjectId,
+  ThreadId,
   TrimmedNonEmptyString,
   TrimmedString,
   type UnknownUnionMember,
 } from "./baseSchemas.ts";
+
+/** Runs the project's `runOnWorktreeCreate` script in the thread's existing worktree. */
+export const ThreadRunWorktreeSetupInput = Schema.Struct({ threadId: ThreadId });
+export type ThreadRunWorktreeSetupInput = typeof ThreadRunWorktreeSetupInput.Type;
+
+export const ThreadRunWorktreeSetupResult = Schema.Struct({
+  status: Schema.Literals(["started", "no-script"]),
+});
+export type ThreadRunWorktreeSetupResult = typeof ThreadRunWorktreeSetupResult.Type;
+
+export class ThreadRunWorktreeSetupError extends Schema.TaggedError<ThreadRunWorktreeSetupError>()(
+  "ThreadRunWorktreeSetupError",
+  { threadId: ThreadId, message: Schema.String, cause: Schema.optional(Schema.Defect()) },
+) {}
 
 const PROJECT_SEARCH_ENTRIES_MAX_LIMIT = 200;
 const PROJECT_SEARCH_CONTENTS_MAX_LIMIT = 500;

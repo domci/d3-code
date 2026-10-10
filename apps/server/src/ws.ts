@@ -226,6 +226,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as PullRequestSyncReactor from "./orchestration-v2/PullRequestSyncReactor.ts";
 import * as SourceControlDiscovery from "./sourceControl/SourceControlDiscovery.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
+import * as GitHubProjectBoard from "./sourceControl/GitHubProjectBoard.ts";
 import * as AzureDevOpsCli from "./sourceControl/AzureDevOpsCli.ts";
 import * as BitbucketApi from "./sourceControl/BitbucketApi.ts";
 import * as GitHubCli from "./sourceControl/GitHubCli.ts";
@@ -1311,6 +1312,7 @@ const layerWsRpc = (
       );
       const sourceControlRepositories =
         yield* SourceControlRepositoryService.SourceControlRepositoryService;
+      const gitHubProjectBoard = yield* GitHubProjectBoard.GitHubProjectBoard;
       const withPullRequestViewer = pullRequests.withRoutingCredential;
       const bootstrapCredentials = yield* PairingGrantStore.PairingGrantStore;
       const sessions = yield* SessionStore.SessionStore;
@@ -1513,7 +1515,7 @@ const layerWsRpc = (
               if (racedImport !== null) return { threadId, imported: false } as const;
               return yield* new AcpRegistryOperationError({
                 reason: "session_import_failed",
-                message: "Could not create a T3 thread for the ACP session.",
+                message: "Could not create a D3 thread for the ACP session.",
                 cause: launched.failure,
               });
             }
@@ -1554,7 +1556,7 @@ const layerWsRpc = (
             if (importedThread !== null) {
               return yield* new AcpRegistryOperationError({
                 reason: "session_delete_failed",
-                message: "Delete the imported T3 thread before deleting its native ACP session.",
+                message: "Delete the imported D3 thread before deleting its native ACP session.",
               });
             }
             yield* manager.deleteSession({
@@ -2275,6 +2277,7 @@ const layerWsRpc = (
                   }),
             ),
           ),
+        [WS_METHODS.threadRunWorktreeSetup]: (input) => threadLaunch.runWorktreeSetup(input),
         [WS_METHODS.serverUpdateProvider]: (input) =>
           providerMaintenanceRunner.updateProvider(input),
         [WS_METHODS.providerConsumeResetCredit]: (input) =>
@@ -2522,6 +2525,10 @@ const layerWsRpc = (
           withPullRequestViewer(input, pullRequests.setLabels(input)),
         [WS_METHODS.sourceControlLookupRepository]: (input) =>
           sourceControlRepositories.lookupRepository(input),
+        [WS_METHODS.sourceControlGetProjectBoard]: (input) =>
+          gitHubProjectBoard.getProjectBoard(input),
+        [WS_METHODS.sourceControlMoveProjectBoardItem]: (input) =>
+          gitHubProjectBoard.moveItem(input),
         [WS_METHODS.sourceControlCloneRepository]: (input) =>
           sourceControlRepositories.cloneRepository(input),
         [WS_METHODS.projectCloneStart]: (input) =>
@@ -2651,7 +2658,8 @@ const layerWsRpc = (
                 new ProjectMutationError({
                   commandId: mutation.commandId,
                   message:
-                    cause._tag === "ProjectNotEmptyError"
+                    cause._tag === "ProjectNotEmptyError" ||
+                    cause._tag === "ProjectIconInvalidError"
                       ? cause.message
                       : "Failed to mutate project.",
                   cause,

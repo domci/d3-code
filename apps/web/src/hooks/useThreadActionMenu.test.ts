@@ -110,6 +110,10 @@ vi.mock("../components/Sidebar.snooze", () => ({
 vi.mock("./useCopyToClipboard", () => ({
   useCopyToClipboard: () => ({ copyToClipboard: () => recordEffect("copy") }),
 }));
+vi.mock("./useForkThread", () => ({
+  readProjectGitBranch: async () => ({ isRepo: false, refName: null }),
+  useForkThread: () => async () => recordEffect("fork"),
+}));
 vi.mock("./useHandleNewThread", () => ({
   useNewThreadHandler: () => async () => recordEffect("draft"),
 }));

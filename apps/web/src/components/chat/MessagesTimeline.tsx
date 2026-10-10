@@ -179,6 +179,7 @@ import {
   timelineContentOverflowsViewport,
 } from "./timelineScrollAnchoring";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { ForkThreadMenu, type ForkWorktreeSource } from "./ForkThreadMenu";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { inferEntryKindFromPath } from "../../pierre-icons";
 import { AssistantSelectionToolbar } from "./AssistantSelectionToolbar";
@@ -320,7 +321,9 @@ interface TimelineRowSharedState {
   onForkFromRun: (input: {
     readonly sourceThreadId: ThreadId;
     readonly runId: RunId;
+    readonly newWorktree?: { readonly baseBranch: string };
   }) => Promise<void>;
+  forkWorktreeSource: ForkWorktreeSource | null;
   onRollbackCheckpoint: (input: {
     readonly checkpointId: string;
     readonly scopeId: string;
@@ -451,7 +454,10 @@ interface MessagesTimelineProps {
   onForkFromRun: (input: {
     readonly sourceThreadId: ThreadId;
     readonly runId: RunId;
+    readonly newWorktree?: { readonly baseBranch: string };
   }) => Promise<void>;
+  /** Offers forking into a new worktree; null when the project is not a git repository. */
+  forkWorktreeSource?: ForkWorktreeSource | null;
   onRollbackCheckpoint: (input: {
     readonly checkpointId: string;
     readonly scopeId: string;
@@ -530,6 +536,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onOpenThread,
   parentThreadLink = null,
   onForkFromRun,
+  forkWorktreeSource = null,
   onRollbackCheckpoint,
   supportsConversationRollback,
   onRevertToTurnCount,
@@ -1174,6 +1181,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onOpenTurnDiff,
       onOpenThread,
       onForkFromRun,
+      forkWorktreeSource,
       onRollbackCheckpoint,
       onToggleTurnFold,
       onToggleAttemptFold,
@@ -1209,6 +1217,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onOpenTurnDiff,
       onOpenThread,
       onForkFromRun,
+      forkWorktreeSource,
       onRollbackCheckpoint,
       onToggleTurnFold,
       onToggleAttemptFold,
@@ -2502,7 +2511,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
   return (
     <>
       <div className="relative min-w-0 px-1 py-0.5">
-        <MessageAuthorHeading>T3 Code</MessageAuthorHeading>
+        <MessageAuthorHeading>D3 Code</MessageAuthorHeading>
         <AssistantCitationSource
           messageId={row.message.id}
           {...(ctx.threadRef ? { threadRef: ctx.threadRef } : {})}
@@ -2538,6 +2547,18 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
             copyStreaming={row.assistantCopyStreaming}
           />
         ) : null}
+        {row.interimAssistant && !row.showAssistantMeta && row.projectedItem ? (
+          // Mid-turn messages carry no meta row; give them the fork control only.
+          // No per-row item-support subscription here: capabilities are left to
+          // the server's portable fallback (see canForkProjectedAssistantItem).
+          <div className="mt-1 flex items-center text-xs opacity-0 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover/assistant:opacity-100">
+            <AssistantForkControl
+              projectedItem={row.projectedItem}
+              capabilities={undefined}
+              final={false}
+            />
+          </div>
+        ) : null}
       </div>
     </>
   );
@@ -2549,19 +2570,66 @@ function AssistantForkButton({
   readonly projectedItem: NonNullable<Extract<TimelineRow, { kind: "message" }>["projectedItem"]>;
 }) {
   const ctx = use(TimelineRowCtx);
-  const [busy, setBusy] = useState(false);
   const support = useV2ItemSupport({
     environmentId: ctx.activeThreadEnvironmentId,
     sourceThreadId: projectedItem.sourceThreadId,
     sourceItemId: projectedItem.sourceItemId,
   });
-  const canFork = canForkProjectedAssistantItem({
-    projectedItem,
-    capabilities: support.providerSession?.capabilities,
-  });
+  return (
+    <AssistantForkControl
+      projectedItem={projectedItem}
+      capabilities={support.providerSession?.capabilities}
+      final
+    />
+  );
+}
+
+/**
+ * Forks are per run: every assistant message of a run forks at the end of
+ * that run, so interim messages say so. A run still in flight has no stable
+ * end yet, so its messages get no control.
+ */
+function AssistantForkControl({
+  projectedItem,
+  capabilities,
+  final,
+}: {
+  readonly projectedItem: NonNullable<Extract<TimelineRow, { kind: "message" }>["projectedItem"]>;
+  readonly final: boolean;
+  readonly capabilities: Parameters<typeof canForkProjectedAssistantItem>[0]["capabilities"];
+}) {
+  const ctx = use(TimelineRowCtx);
+  const { isWorking, latestRunId } = use(TimelineRowActivityCtx);
+  const [busy, setBusy] = useState(false);
+  const runInFlight =
+    isWorking && projectedItem.item.runId !== null && projectedItem.item.runId === latestRunId;
+  const canFork = canForkProjectedAssistantItem({ projectedItem, capabilities, runInFlight });
 
   if (!canFork || projectedItem.item.runId === null) return null;
+  const label = final ? "Fork from this response" : "Fork from the end of this turn";
   const runId = projectedItem.item.runId;
+  const fork = (newWorktree?: { readonly baseBranch: string }) => {
+    setBusy(true);
+    void ctx
+      .onForkFromRun({
+        sourceThreadId: projectedItem.sourceThreadId,
+        runId,
+        ...(newWorktree ? { newWorktree } : {}),
+      })
+      .finally(() => setBusy(false));
+  };
+
+  if (ctx.forkWorktreeSource) {
+    return (
+      <ForkThreadMenu
+        environmentId={ctx.activeThreadEnvironmentId}
+        source={ctx.forkWorktreeSource}
+        busy={busy}
+        label={label}
+        onFork={fork}
+      />
+    );
+  }
 
   return (
     <Tooltip>
@@ -2572,19 +2640,14 @@ function AssistantForkButton({
             size="xs"
             variant="ghost"
             disabled={busy}
-            onClick={() => {
-              setBusy(true);
-              void ctx
-                .onForkFromRun({ sourceThreadId: projectedItem.sourceThreadId, runId })
-                .finally(() => setBusy(false));
-            }}
-            aria-label="Fork from this response"
+            onClick={() => fork()}
+            aria-label={label}
           />
         }
       >
         <GitForkIcon className={cn("size-3", busy && "animate-pulse")} />
       </TooltipTrigger>
-      <TooltipPopup side="top">Fork from this response</TooltipPopup>
+      <TooltipPopup side="top">{label}</TooltipPopup>
     </Tooltip>
   );
 }

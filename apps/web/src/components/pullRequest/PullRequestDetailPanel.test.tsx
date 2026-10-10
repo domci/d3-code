@@ -103,6 +103,28 @@ vi.mock("./PullRequestMarkdown", () => ({
   PullRequestMarkdown: () => null,
 }));
 vi.mock("~/browser/useOpenLink", () => ({ useOpenLink: () => vi.fn() }));
+vi.mock("./PullRequestFixMenu", () => ({
+  PullRequestFixMenu: ({
+    children,
+    canFixHere,
+    onFix,
+    "aria-label": _ignored,
+    render,
+  }: {
+    children: ReactNode;
+    canFixHere: boolean;
+    onFix: (where: "here" | "new") => void;
+    "aria-label"?: string;
+    render: { props: { "aria-label"?: string } };
+  }) => (
+    <button
+      aria-label={render.props["aria-label"]}
+      onClick={() => onFix(canFixHere ? "here" : "new")}
+    >
+      {children}
+    </button>
+  ),
+}));
 vi.mock("./PullRequestThreadLinks", () => ({ PullRequestThreadLinks: () => null }));
 vi.mock("./PullRequestSummaryTab", () => ({
   PullRequestSummaryTab: ({

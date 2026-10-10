@@ -43,6 +43,11 @@ const encodeGitCommandError = Schema.encodeEffect(Schema.fromJsonString(GitComma
 const layerServerConfig = ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-git-vcs-driver-test-",
 });
+// Same driver, with the config exposed so a test can find the worktrees directory.
+const layerWithConfig = Layer.fresh(GitVcsDriver.layer).pipe(
+  Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-git-vcs-driver-cfg-" })),
+  Layer.provideMerge(NodeServices.layer),
+);
 const layerTest = GitVcsDriver.layer.pipe(
   Layer.provide(layerServerConfig),
   Layer.provideMerge(NodeServices.layer),
@@ -2981,6 +2986,48 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect(
+      "lays temp-branch worktrees out as <token>/<repo>, avoids collisions, prunes <token>",
+      () =>
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const pathService = yield* Path.Path;
+          const cwd = yield* makeTmpDir();
+          const { initialBranch } = yield* initRepoWithCommit(cwd);
+          const worktreesDirectory = yield* makeTmpDir("custom-worktrees-");
+          const driver = yield* GitVcsDriver.GitVcsDriver;
+
+          const first = yield* driver.createWorktree(
+            { cwd, path: null, refName: initialBranch, newRefName: "d3/359d97ab" },
+            { worktreesDirectory },
+          );
+          assert.equal(
+            first.worktree.path,
+            pathService.join(worktreesDirectory, "359d97ab", pathService.basename(cwd)),
+          );
+
+          // Occupy the id for the next temp branch so the path must change.
+          yield* fileSystem.makeDirectory(
+            pathService.join(worktreesDirectory, "11112222", pathService.basename(cwd)),
+            { recursive: true },
+          );
+          const second = yield* driver.createWorktree(
+            { cwd, path: null, refName: initialBranch, newRefName: "d3/11112222" },
+            { worktreesDirectory },
+          );
+          assert.match(
+            pathService.relative(worktreesDirectory, second.worktree.path),
+            /^11112222-[0-9a-f]{4}[\\/]/,
+          );
+
+          yield* driver.removeWorktree({ cwd, path: first.worktree.path, force: false });
+          assert.equal(
+            yield* fileSystem.exists(pathService.join(worktreesDirectory, "359d97ab")),
+            false,
+          );
+        }),
+    );
+
     it.effect("creates worktrees under the configured worktrees directory", () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
@@ -2996,8 +3043,8 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         );
         const expected = pathService.join(
           worktreesDirectory,
-          pathService.basename(cwd),
           "feature-custom-dir",
+          pathService.basename(cwd),
         );
         assert.equal(created.worktree.path, expected);
         assert.equal(yield* fileSystem.exists(expected), true);
@@ -3193,6 +3240,71 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         assert.equal(yield* fileSystem.exists(worktreePath), false);
         assert.notInclude(yield* driver.listLocalBranchNames(cwd), "feature/worktree");
       }),
+    );
+
+    it.effect(
+      "prunes the emptied id folder for a worktree stored through a symlinked ancestor",
+      () =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const config = yield* ServerConfig.ServerConfig;
+            const cwd = yield* makeTmpDir();
+            const { initialBranch } = yield* initRepoWithCommit(cwd);
+            const pathService = yield* Path.Path;
+            const fileSystem = yield* FileSystem.FileSystem;
+            // `<base>-alias` -> `<base>`, as `~/.t3` -> `~/.d3` after the move.
+            const alias = `${config.baseDir}-alias`;
+            NodeFS.symlinkSync(config.baseDir, alias);
+            yield* Effect.addFinalizer(() =>
+              Effect.sync(() => NodeFS.rmSync(alias, { force: true })),
+            );
+            const idDir = pathService.join(config.worktreesDir, "my-feature");
+            const driver = yield* GitVcsDriver.GitVcsDriver;
+            yield* driver.createWorktree({
+              cwd,
+              path: pathService.join(idDir, "repo"),
+              refName: initialBranch,
+              newRefName: "my-feature",
+            });
+
+            yield* driver.removeWorktree({
+              cwd,
+              path: pathService.join(alias, "worktrees", "my-feature", "repo"),
+            });
+
+            assert.equal(yield* fileSystem.exists(idDir), false);
+          }),
+        ).pipe(Effect.provide(layerWithConfig)),
+    );
+
+    it.effect("reports the caller's spelling of a worktree path reached through a symlink", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const cwd = yield* makeTmpDir();
+          const { initialBranch } = yield* initRepoWithCommit(cwd);
+          const pathService = yield* Path.Path;
+          const parent = yield* makeTmpDir("git-worktrees-");
+          const alias = `${parent}-alias`;
+          NodeFS.symlinkSync(parent, alias);
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => NodeFS.rmSync(alias, { force: true })),
+          );
+          const driver = yield* GitVcsDriver.GitVcsDriver;
+          yield* driver.createWorktree({
+            cwd,
+            path: pathService.join(parent, "wt"),
+            refName: initialBranch,
+            newRefName: "feature/aliased",
+          });
+          const viaAlias = pathService.join(alias, "wt");
+
+          const refs = yield* driver.listRefs({ cwd: viaAlias, limit: 100 });
+          const ref = refs.refs.find((entry) => entry.name === "feature/aliased");
+
+          assert.equal(ref?.worktreePath, viaAlias);
+          assert.equal(ref?.current, true);
+        }),
+      ),
     );
 
     it.effect("allows worktree removal to run longer than the default command timeout", () =>

@@ -2,7 +2,7 @@ import { parseChangeRequestUrl } from "@t3tools/shared/changeRequestUrl";
 import { useAtomValue } from "@effect/atom-react";
 import { usePullRequestStack } from "~/state/usePullRequestStack";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
-import { scopedThreadKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
   AuthOrchestrationOperateScope,
@@ -53,7 +53,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
+import type { DraftId } from "~/composerDraftStore";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { isCommandPaletteOpen } from "~/commandPaletteBus";
@@ -63,7 +63,11 @@ import {
   type ShortcutMatchContext,
 } from "~/keybindings";
 import { primaryServerKeybindingsAtom } from "~/state/server";
-import { usePullRequestDefaultMergeMethodResolver } from "./usePullRequestActions";
+import { PullRequestFixMenu } from "./PullRequestFixMenu";
+import {
+  usePullRequestDefaultMergeMethodResolver,
+  writeTaskToComposer,
+} from "./usePullRequestActions";
 import { changeRequestRepositoryUrl, gitHubPullRequestBrowserUrl } from "~/lib/openPullRequestLink";
 import { usePreparePullRequestThreadAction } from "~/lib/sourceControlActions";
 import { cn } from "~/lib/utils";
@@ -135,8 +139,6 @@ import {
   buildFixFindingHandoff,
   buildFixFindingsHandoff,
   buildResolveConflictsPrompt,
-  handoffPrompt,
-  handoffReviewComments,
   latestPullRequestReviewOutcomes,
   loadingPullRequestCheckoutCommand,
   isPullRequestNotFound,
@@ -157,7 +159,6 @@ import {
   resolvePullRequestMergeMethod,
   type PullRequestFinding,
   shouldRefreshPullRequestActivity,
-  stripPullRequestHandoffReferences,
   writePullRequestDetailSnapshot,
 } from "./pullRequestDetail.logic";
 import { canEditPullRequestChangeRequest } from "./pullRequestEditing.logic";
@@ -254,16 +255,6 @@ const TABS: ReadonlyArray<{ value: DetailTab; label: string }> = [
 // Start the download on tab hover or focus, before the click, without loading it for every PR.
 const loadCodeTab = () => import("./PullRequestCodeTab");
 const PullRequestCodeTab = lazy(loadCodeTab);
-
-/**
- * What the last hand-off wrote into each draft, kept outside React because the panel that wrote it
- * is closed by the time the next one opens. It is how a prompt the reader has since edited is told
- * apart from the one they were handed: only the sentence still exactly as written may be replaced.
- */
-const lastHandoffPromptByDraft = new Map<string, string>();
-
-const composerTargetKey = (target: ScopedThreadRef | DraftId): string =>
-  typeof target === "string" ? target : scopedThreadKey(target);
 
 /**
  * Which server the checkout and the hand-offs land on, where more than one of them holds this
@@ -1062,43 +1053,6 @@ export function PullRequestDetailPanel({
   const canFixFindings = attachTarget !== null || canPrepareWorktree;
   const handoffLabels = pullRequestHandoffLabels(attachTarget !== null);
 
-  const writeTaskToComposer = (target: ScopedThreadRef | DraftId, task: ThreadTask) => {
-    const store = useComposerDraftStore.getState();
-    const draft = store.getComposerDraft(target);
-    const key = composerTargetKey(target);
-    const previousCommentIds = new Set((draft?.reviewComments ?? []).map((comment) => comment.id));
-    const repeatedCommentIds = new Set(
-      (task.reviewComments ?? [])
-        .filter((comment) => previousCommentIds.has(comment.id))
-        .map((comment) => comment.id),
-    );
-    const promptWithoutPreviousHandoff = stripPullRequestHandoffReferences(
-      draft?.prompt ?? "",
-      draft?.reviewComments ?? [],
-      repeatedCommentIds,
-    );
-    const prompt = handoffPrompt(
-      {
-        prompt: promptWithoutPreviousHandoff,
-        lastHandoffPrompt: lastHandoffPromptByDraft.get(key),
-      },
-      task.prompt,
-    );
-    lastHandoffPromptByDraft.set(key, task.prompt);
-    store.setPrompt(target, prompt);
-    store.setReviewComments(
-      target,
-      handoffReviewComments(draft?.reviewComments ?? [], task.reviewComments ?? []),
-    );
-    for (const comment of task.reviewComments ?? []) {
-      if (!repeatedCommentIds.has(comment.id)) continue;
-      store.addReviewComment(target, comment, {
-        allowDuplicateReference: true,
-        insertAtCaret: false,
-      });
-    }
-  };
-
   /**
    * Opens a thread on this project and leaves the task in its composer for the reader to send.
    *
@@ -1176,9 +1130,11 @@ export function PullRequestDetailPanel({
     // the repository itself is what you want when the point is to run the thing where you
     // already work — and it moves the branch under everything else that is open there.
     mode: "worktree" | "local" = "worktree",
+    // Beside a thread the task lands in its composer unless a new session is asked for.
+    where: "here" | "new" = attachTarget !== null ? "here" : "new",
   ) => {
     if (!handoffSummary || handoff !== null) return;
-    if (attachTarget !== null && task !== null) {
+    if (where === "here" && attachTarget !== null && task !== null) {
       writeTaskToComposer(attachTarget, task);
       toastManager.add({
         type: "success",
@@ -1368,7 +1324,7 @@ export function PullRequestDetailPanel({
   };
 
   /** One finding, handed over on its own — the surfaces that show findings call this. */
-  const startFixFinding = (finding: PullRequestFinding) => {
+  const startFixFinding = (finding: PullRequestFinding, where?: "here" | "new") => {
     if (!detail) return;
     void startHandoff(
       pullRequestFindingKey(finding),
@@ -1380,6 +1336,8 @@ export function PullRequestDetailPanel({
         baseBranch: detail.baseBranch,
         finding,
       }),
+      "worktree",
+      where,
     );
   };
 
@@ -1401,16 +1359,21 @@ export function PullRequestDetailPanel({
     );
   };
 
-  const startResolveConflicts = () => {
+  const startResolveConflicts = (where?: "here" | "new") => {
     if (!handoffSummary) return;
-    void startHandoff("conflicts", {
-      prompt: buildResolveConflictsPrompt({
-        number: handoffSummary.number,
-        url: handoffSummary.url,
-        headBranch: handoffSummary.headBranch,
-        baseBranch: handoffSummary.baseBranch,
-      }),
-    });
+    void startHandoff(
+      "conflicts",
+      {
+        prompt: buildResolveConflictsPrompt({
+          number: handoffSummary.number,
+          url: handoffSummary.url,
+          headBranch: handoffSummary.headBranch,
+          baseBranch: handoffSummary.baseBranch,
+        }),
+      },
+      "worktree",
+      where,
+    );
   };
 
   // The host says which strategies it offers at all; the repository narrows that to the ones
@@ -1605,18 +1568,26 @@ export function PullRequestDetailPanel({
       <TooltipTrigger
         render={
           <span className="inline-flex shrink-0">
-            <Button
-              size="xs"
-              variant="destructive-outline"
+            <PullRequestFixMenu
+              render={
+                <Button
+                  size="xs"
+                  variant="destructive-outline"
+                  aria-label={handoff === "conflicts" ? "Preparing..." : "Resolve conflicts"}
+                />
+              }
+              canFixHere={attachTarget !== null}
+              hereLabel="Resolve in this session"
+              newLabel="Resolve in new session"
+              newDisabled={checkoutRoot === null}
               disabled={handoff !== null || (attachTarget === null && checkoutRoot === null)}
-              onClick={startResolveConflicts}
-              aria-label={handoff === "conflicts" ? "Preparing..." : "Resolve conflicts"}
+              onFix={startResolveConflicts}
             >
               <PullRequestGlyph.conflicting aria-hidden className="size-3.5" />
               <span className="@max-[30rem]/pr-header:hidden">
                 {handoff === "conflicts" ? "Preparing..." : "Resolve conflicts"}
               </span>
-            </Button>
+            </PullRequestFixMenu>
           </span>
         }
       />
@@ -2753,6 +2724,8 @@ export function PullRequestDetailPanel({
                   pendingFinding={handoff}
                   fixFindingLabel={handoffLabels.fixFinding}
                   fixCheckLabel={handoffLabels.fixCheck}
+                  fixCheckHere={attachTarget !== null}
+                  fixCheckNewDisabled={!canPrepareWorktree}
                   {...(canFixFindings ? { onFixFinding: startFixFinding } : {})}
                   onRefresh={refreshDetail}
                   onRefreshChecks={refreshFromHost}

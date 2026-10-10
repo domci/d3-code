@@ -110,7 +110,8 @@ export function getThreadSortTimestamp(
   thread: ThreadSortInput,
   sortOrder: SidebarThreadSortOrder | Exclude<SidebarProjectSortOrder, "manual">,
 ): number {
-  if (sortOrder === "created_at") {
+  // "manual" has no timestamp order of its own; callers that cannot arrange threads use creation time.
+  if (sortOrder === "created_at" || sortOrder === "manual") {
     return (
       getFirstSortableTimestamp(thread.createdAt, thread.updatedAt) ?? Number.NEGATIVE_INFINITY
     );

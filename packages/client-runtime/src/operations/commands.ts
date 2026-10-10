@@ -214,7 +214,8 @@ export type StopThreadSessionInput = ThreadCommandInput;
 export interface ForkThreadFromRunInput extends CommandMetadata {
   readonly sourceThreadId: ThreadId;
   readonly targetThreadId: ThreadId;
-  readonly runId: RunId;
+  /** Omit to fork from the source's latest stable (completed, checkpointed) run. */
+  readonly runId?: RunId;
   readonly title?: string;
 }
 
@@ -944,7 +945,8 @@ export const forkThreadFromRun = Effect.fn("EnvironmentCommands.forkThreadFromRu
     creationSource: input.creationSource ?? "web",
     sourceThreadId: input.sourceThreadId,
     targetThreadId: input.targetThreadId,
-    sourcePoint: { type: "run", runId: input.runId },
+    sourcePoint:
+      input.runId === undefined ? { type: "latest_stable" } : { type: "run", runId: input.runId },
     ...(input.title === undefined ? {} : { title: input.title }),
   });
 });

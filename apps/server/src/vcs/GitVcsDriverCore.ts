@@ -8,6 +8,7 @@ import * as Hex from "effect/encoding/Hex";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
+import * as Random from "effect/Random";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Ref from "effect/Ref";
@@ -36,7 +37,8 @@ import { parseT3ProjectFile } from "@t3tools/shared/t3ProjectFile";
 import { resolveProjectFileBackedSetting } from "@t3tools/shared/projectSettings";
 import { gitCommandDuration, gitCommandsTotal, withMetrics } from "../observability/Metrics.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
-import { resolveWorktreesDirectory } from "../worktreesDirectory.ts";
+import { canonicalPath } from "../canonicalPath.ts";
+import { buildWorktreePath, resolveWorktreesDirectory } from "../worktreesDirectory.ts";
 import {
   parseRemoteNames,
   parseRemoteNamesInGitOrder,
@@ -3304,15 +3306,29 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         repositoryPaths.gitCommonDir,
         input.refresh === true,
       );
+      // Git prints the real path for a main checkout but the registered path
+      // for a linked worktree, and `~/.t3` is a symlink to `~/.d3` after the
+      // data folder move. Compare real paths, and report the caller's own
+      // spelling of `cwd` so clients can match it against stored paths.
+      const worktreeRootReal =
+        repositoryPaths.worktreeRoot === null ? null : canonicalPath(repositoryPaths.worktreeRoot);
+      const cwdReal = canonicalPath(input.cwd);
       const hasCurrentWorktreeBranch =
-        repositoryPaths.worktreeRoot !== null &&
-        snapshot.localBranches.some((ref) => ref.worktreePath === repositoryPaths.worktreeRoot);
-      const localBranches = snapshot.localBranches.map((ref) => ({
-        ...ref,
-        current: hasCurrentWorktreeBranch
-          ? ref.worktreePath === repositoryPaths.worktreeRoot
-          : ref.name === repositoryPaths.currentBranch,
-      }));
+        worktreeRootReal !== null &&
+        snapshot.localBranches.some(
+          (ref) =>
+            ref.worktreePath !== null && canonicalPath(ref.worktreePath) === worktreeRootReal,
+        );
+      const localBranches = snapshot.localBranches.map((ref) => {
+        const real = ref.worktreePath === null ? null : canonicalPath(ref.worktreePath);
+        return {
+          ...ref,
+          ...(real === cwdReal ? { worktreePath: path.resolve(input.cwd) } : {}),
+          current: hasCurrentWorktreeBranch
+            ? real === worktreeRootReal
+            : ref.name === repositoryPaths.currentBranch,
+        };
+      });
       const combinedBranches = input.includeMatchingRemoteRefs
         ? [...localBranches, ...snapshot.remoteBranches]
         : dedupeRemoteBranchesWithLocalMatches([...localBranches, ...snapshot.remoteBranches]);
@@ -3349,7 +3365,6 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     "createWorktree",
   )(function* (input, options) {
     const targetBranch = input.newRefName ?? input.refName;
-    const sanitizedBranch = targetBranch.replace(/\//g, "-");
     const repoName = path.basename(input.cwd);
     let worktreePath = input.path;
     if (worktreePath == null) {
@@ -3366,7 +3381,11 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           detail: `The worktree location "${options?.worktreesDirectory}" must be an absolute folder on this machine, not a drive root. Change it in Settings → Storage.`,
         });
       }
-      worktreePath = path.join(parentDir, repoName, sanitizedBranch);
+      worktreePath = buildWorktreePath(parentDir, repoName, targetBranch, path);
+      if (yield* fileSystem.exists(worktreePath).pipe(Effect.orElseSucceed(() => false))) {
+        const suffix = (yield* Random.nextIntBetween(0x1000, 0xffff)).toString(16);
+        worktreePath = buildWorktreePath(parentDir, repoName, targetBranch, path, suffix);
+      }
     }
     const args = input.newRefName
       ? ["worktree", "add", "-b", input.newRefName, worktreePath, input.refName]
@@ -3735,6 +3754,25 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       input.branch,
     ]);
 
+  // New-layout worktrees live at `<id>/<repo>`; drop the emptied `<id>` folder.
+  // Only folders D3 names itself (a hex token, or a child of the default
+  // worktrees directory) qualify, and only when empty.
+  const pruneEmptyIdDirectory = (worktreePath: string) => {
+    const parent = path.dirname(path.resolve(worktreePath));
+    // Real paths: a stored `~/.t3/...` path reaches `~/.d3/worktrees` through a symlink.
+    const ours =
+      /^[0-9a-f]{8}(?:-[0-9a-f]{4})?$/.test(path.basename(parent)) ||
+      canonicalPath(path.dirname(parent)) === canonicalPath(worktreesDir);
+    return ours
+      ? fileSystem.readDirectory(parent).pipe(
+          Effect.flatMap((entries) =>
+            entries.length === 0 ? fileSystem.remove(parent, { recursive: true }) : Effect.void,
+          ),
+          Effect.ignore,
+        )
+      : Effect.void;
+  };
+
   const removeWorktree: GitVcsDriver.GitVcsDriver["Service"]["removeWorktree"] = Effect.fn(
     "removeWorktree",
   )(function* (input) {
@@ -3756,6 +3794,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       },
     );
     if (result.exitCode === 0) {
+      yield* pruneEmptyIdDirectory(input.path);
       return;
     }
     // Threads can share a worktree path, and worktrees get removed or pruned

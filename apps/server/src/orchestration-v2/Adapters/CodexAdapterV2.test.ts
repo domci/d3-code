@@ -399,7 +399,7 @@ describe("CodexAdapterV2 assistant message streaming", () => {
 });
 
 describe("CodexAdapterV2 runtime policy", () => {
-  it.effect("derives concrete Codex turn policies from every T3 runtime mode", () =>
+  it.effect("derives concrete Codex turn policies from every D3 runtime mode", () =>
     Effect.gen(function* () {
       const build = (
         runtimeMode: "approval-required" | "auto-accept-edits" | "auto" | "full-access",
@@ -463,7 +463,7 @@ describe("CodexAdapterV2 runtime policy", () => {
     }),
   );
 
-  it.effect("adds default-mode developer instructions when the T3 MCP server is attached", () =>
+  it.effect("adds default-mode developer instructions when the D3 MCP server is attached", () =>
     Effect.gen(function* () {
       const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
         nativeThreadId: "native-orchestration-instructions",
@@ -492,7 +492,7 @@ describe("CodexAdapterV2 runtime policy", () => {
     }),
   );
 
-  it.effect("omits default-mode collaboration settings without the T3 MCP server", () =>
+  it.effect("omits default-mode collaboration settings without the D3 MCP server", () =>
     Effect.gen(function* () {
       const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
         nativeThreadId: "native-default-without-t3-mcp",
@@ -513,7 +513,7 @@ describe("CodexAdapterV2 runtime policy", () => {
     }),
   );
 
-  it.effect("adds T3 plan-mode developer instructions when the T3 MCP server is attached", () =>
+  it.effect("adds D3 plan-mode developer instructions when the D3 MCP server is attached", () =>
     Effect.gen(function* () {
       const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
         nativeThreadId: "native-plan-with-t3-mcp",
@@ -539,7 +539,7 @@ describe("CodexAdapterV2 runtime policy", () => {
     }),
   );
 
-  it.effect("keeps Codex in plan mode without referencing unavailable T3 MCP tools", () =>
+  it.effect("keeps Codex in plan mode without referencing unavailable D3 MCP tools", () =>
     Effect.gen(function* () {
       const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
         nativeThreadId: "native-plan-without-t3-mcp",
@@ -1735,6 +1735,7 @@ describe("CodexAdapterV2 session initialize", () => {
             modelSelection: CODEX_TEST_MODEL_SELECTION,
             runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
           }),
+        runtime,
         initializeRequests: () => initializeRequests,
       };
     });
@@ -1851,6 +1852,40 @@ describe("CodexAdapterV2 session initialize", () => {
       const providerThread = yield* session.ensureThread("thread-initialize-interrupted");
       assert.equal(providerThread.nativeThreadRef?.nativeId, "initialize-interrupted");
       assert.equal(session.initializeRequests(), 2);
+    }).pipe(Effect.scoped, Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+  );
+
+  it.effect("names, archives and restores the native thread without a turn", () =>
+    Effect.gen(function* () {
+      const providerRequest = (id: number, method: string, params: Record<string, string>) =>
+        [
+          { type: "expect_outbound", label: method, frame: { id, method, params } },
+          { type: "emit_inbound", label: method, frame: { id, result: {} } },
+        ] satisfies ReadonlyArray<CodexReplay.CodexAppServerReplayEntry>;
+      const preamble = replayPreamble("native-controls");
+      const session = yield* openReplaySession(
+        makeCodexReplayTranscript({
+          scenario: "native-controls",
+          entries: [
+            ...preamble.slice(0, 3),
+            ...providerRequest(2, "thread/name/set", {
+              threadId: "native-controls",
+              name: "Fix the login bug",
+            }),
+            ...providerRequest(3, "thread/archive", { threadId: "native-controls" }),
+            ...providerRequest(4, "thread/unarchive", { threadId: "native-controls" }),
+          ],
+        }),
+      );
+      const providerThread = {
+        nativeThreadRef: { driver: CodexAdapterV2.CODEX_DRIVER_KIND, nativeId: "native-controls" },
+      } as OrchestrationV2ProviderThread;
+
+      // One handshake serves all three calls; the replay fails on any other frame.
+      yield* session.runtime.setThreadTitle!({ providerThread, title: "Fix the login bug" });
+      yield* session.runtime.setThreadArchived!({ providerThread, archived: true });
+      yield* session.runtime.setThreadArchived!({ providerThread, archived: false });
+      assert.equal(session.initializeRequests(), 1);
     }).pipe(Effect.scoped, Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
   );
 });
@@ -2635,7 +2670,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     ),
   );
 
-  it.effect("preserves T3 context on the wire and restores it after compaction", () =>
+  it.effect("preserves D3 context on the wire and restores it after compaction", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const nativeThreadId = "context-thread";

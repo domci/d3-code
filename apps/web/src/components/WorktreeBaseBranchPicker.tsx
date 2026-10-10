@@ -17,7 +17,7 @@ export function WorktreeBaseBranchPicker({
   cwd,
   value,
   onValueChange,
-  startFromOrigin,
+  startFromOrigin = false,
   onStartFromOriginChange,
   disabled = false,
   id,
@@ -26,8 +26,9 @@ export function WorktreeBaseBranchPicker({
   cwd: string | null;
   value: string;
   onValueChange: (branch: string) => void;
-  startFromOrigin: boolean;
-  onStartFromOriginChange: (checked: boolean) => void;
+  /** The origin switch is shown only when `onStartFromOriginChange` is provided. */
+  startFromOrigin?: boolean;
+  onStartFromOriginChange?: (checked: boolean) => void;
   disabled?: boolean;
   id?: string;
 }) {
@@ -94,7 +95,11 @@ export function WorktreeBaseBranchPicker({
       isFetchingNextPage={branches.isFetchingNextPage}
       onLoadNext={branches.loadNext}
       statusText={statusText}
-      originControl={{ checked: startFromOrigin, onCheckedChange: onStartFromOriginChange }}
+      originControl={
+        onStartFromOriginChange
+          ? { checked: startFromOrigin, onCheckedChange: onStartFromOriginChange }
+          : undefined
+      }
       popupProps={{ align: "start", side: "bottom", className: "flex w-80 flex-col" }}
       renderItem={(name, index) => {
         const branch = branchByName.get(name);

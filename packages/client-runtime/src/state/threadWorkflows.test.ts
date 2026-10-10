@@ -376,6 +376,8 @@ describe("thread workflows", () => {
       }),
     ).toBe(true);
     expect(canForkProjectedAssistantItem({ projectedItem })).toBe(true);
+    expect(canForkProjectedAssistantItem({ projectedItem, runInFlight: true })).toBe(false);
+    expect(canForkProjectedAssistantItem({ projectedItem, runInFlight: false })).toBe(true);
     expect(
       canForkProjectedAssistantItem({
         projectedItem: {

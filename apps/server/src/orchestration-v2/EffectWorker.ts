@@ -20,6 +20,7 @@ import * as RunFinalizationService from "./RunFinalizationService.ts";
 import * as ResourceCleanupService from "./ResourceCleanupService.ts";
 import * as EffectOutbox from "./EffectOutbox.ts";
 import * as CheckpointRollbackService from "./CheckpointRollbackService.ts";
+import * as ProviderNativeSyncService from "./ProviderNativeSyncService.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 import * as ProviderTurnControlService from "./ProviderTurnControlService.ts";
 import * as ProviderTurnStartService from "./ProviderTurnStartService.ts";
@@ -88,6 +89,7 @@ export const layerExecutor: Layer.Layer<
   | ProviderTurnStartService.ProviderTurnStartServiceV2
   | RuntimeRequestService.RuntimeRequestServiceV2
   | ThreadTitleRegenerationService.ThreadTitleRegenerationService
+  | ProviderNativeSyncService.ProviderNativeSyncService
   | ThreadManagementService.ThreadManagementService
   | ServerSettings.ServerSettingsService
 > = Layer.effect(
@@ -102,6 +104,7 @@ export const layerExecutor: Layer.Layer<
     const runtimeRequests = yield* RuntimeRequestService.RuntimeRequestServiceV2;
     const threadTitleRegeneration =
       yield* ThreadTitleRegenerationService.ThreadTitleRegenerationService;
+    const providerNativeSync = yield* ProviderNativeSyncService.ProviderNativeSyncService;
     const threads = yield* ThreadManagementService.ThreadManagementService;
     const settings = yield* ServerSettings.ServerSettingsService;
     return OrchestrationEffectExecutorV2.of({
@@ -467,6 +470,12 @@ export const layerExecutor: Layer.Layer<
                     }),
                 ),
               );
+          case "provider-native.sync":
+            // Best effort and never fails: the service logs what the provider refuses.
+            return providerNativeSync.sync({
+              threadId: effect.threadId,
+              aspects: effect.request.aspects,
+            });
           case "delegated-tasks.stop":
             return threads
               .stopDelegatedTasks({

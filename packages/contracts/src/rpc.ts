@@ -215,6 +215,9 @@ import {
   ProjectWriteFileError,
   ProjectWriteFileInput,
   ProjectWriteFileResult,
+  ThreadRunWorktreeSetupError,
+  ThreadRunWorktreeSetupInput,
+  ThreadRunWorktreeSetupResult,
 } from "./project.ts";
 import {
   TerminalAttachInput,
@@ -340,6 +343,12 @@ import {
 } from "./sourceControl.ts";
 import { VcsError } from "./vcs.ts";
 import { Project, ProjectMutation, ProjectMutationError } from "./project.ts";
+import {
+  MoveProjectBoardItemInput,
+  ProjectBoardError,
+  ProjectBoardInput,
+  ProjectBoardResult,
+} from "./projectBoard.ts";
 
 export const WS_METHODS = {
   // Project registry methods
@@ -369,6 +378,7 @@ export const WS_METHODS = {
 
   // Provider methods
   providerUploadFeedback: "provider.uploadFeedback",
+  threadRunWorktreeSetup: "thread.runWorktreeSetup",
   providerAuthStart: "provider.auth.start",
   providerConsumeResetCredit: "provider.consumeResetCredit",
   providerAuthComplete: "provider.auth.complete",
@@ -523,6 +533,8 @@ export const WS_METHODS = {
   sourceControlLookupRepository: "sourceControl.lookupRepository",
   sourceControlCloneRepository: "sourceControl.cloneRepository",
   sourceControlPublishRepository: "sourceControl.publishRepository",
+  sourceControlGetProjectBoard: "sourceControl.getProjectBoard",
+  sourceControlMoveProjectBoardItem: "sourceControl.moveProjectBoardItem",
   projectCloneStart: "projectClone.start",
   projectCloneCancel: "projectClone.cancel",
   projectCloneRetry: "projectClone.retry",
@@ -1088,6 +1100,21 @@ const WsSourceControlLookupRepositoryRpc = Rpc.make(WS_METHODS.sourceControlLook
   error: Schema.Union([SourceControlRepositoryError, EnvironmentAuthorizationError]),
 });
 
+const WsSourceControlGetProjectBoardRpc = Rpc.make(WS_METHODS.sourceControlGetProjectBoard, {
+  payload: ProjectBoardInput,
+  success: ProjectBoardResult,
+  error: Schema.Union([ProjectBoardError, EnvironmentAuthorizationError]),
+});
+
+const WsSourceControlMoveProjectBoardItemRpc = Rpc.make(
+  WS_METHODS.sourceControlMoveProjectBoardItem,
+  {
+    payload: MoveProjectBoardItemInput,
+    success: Schema.Void,
+    error: Schema.Union([ProjectBoardError, EnvironmentAuthorizationError]),
+  },
+);
+
 const WsSourceControlCloneRepositoryRpc = Rpc.make(WS_METHODS.sourceControlCloneRepository, {
   payload: SourceControlCloneRepositoryInput,
   success: SourceControlCloneRepositoryResult,
@@ -1230,6 +1257,12 @@ const WsAttachmentsCreateUploadUrlRpc = Rpc.make(WS_METHODS.attachmentsCreateUpl
 const WsAttachmentsDeleteRpc = Rpc.make(WS_METHODS.attachmentsDelete, {
   payload: AttachmentDeleteInput,
   error: EnvironmentAuthorizationError,
+});
+
+const WsThreadRunWorktreeSetupRpc = Rpc.make(WS_METHODS.threadRunWorktreeSetup, {
+  payload: ThreadRunWorktreeSetupInput,
+  success: ThreadRunWorktreeSetupResult,
+  error: Schema.Union([ThreadRunWorktreeSetupError, EnvironmentAuthorizationError]),
 });
 
 const WsProviderUploadFeedbackRpc = Rpc.make(WS_METHODS.providerUploadFeedback, {
@@ -1834,6 +1867,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsPullRequestsLabelCandidatesRpc,
   WsPullRequestsSetLabelsRpc,
   WsSourceControlLookupRepositoryRpc,
+  WsSourceControlGetProjectBoardRpc,
+  WsSourceControlMoveProjectBoardItemRpc,
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,
   WsProjectCloneStartRpc,
@@ -1857,6 +1892,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsAttachmentsCreateUploadUrlRpc,
   WsAttachmentsDeleteRpc,
   WsProviderUploadFeedbackRpc,
+  WsThreadRunWorktreeSetupRpc,
   WsSubscribeVcsStatusRpc,
   WsSubscribeWorktreeSetupRpc,
   WsWorktreeSetupCancelRpc,

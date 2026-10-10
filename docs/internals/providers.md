@@ -129,6 +129,16 @@ checkpoints but cannot roll back its conversation. The [checkpoint boundary](./o
 therefore rejects revert before touching files. Native permission and question option IDs must
 also survive normalization; a display label is not necessarily a valid reply.
 
+## Mirroring title and settled state onto the provider's conversation
+
+The vendor's own apps list the native conversation, so a `provider-native.sync` effect mirrors the
+thread's title and settled/archived state onto it. Adapters opt in through `nativeThreadControls`
+and the runtime's `setThreadTitle` / `setThreadArchived`; the
+[sync service](../../apps/server/src/orchestration-v2/ProviderNativeSyncService.ts) reuses a live
+session or opens one only for the call, and logs provider failures instead of failing the command.
+Codex uses `thread/name/set` and `thread/archive`. Claude Code has no archive, so only the SDK's
+`renameSession` applies. Sending a message needs no sync: Codex's resume already unarchives.
+
 ## Attachments and stored history
 
 Attachments live outside the project workspace. The

@@ -26,6 +26,7 @@ import type { PlatformError } from "effect/PlatformError";
 import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
 
+import { canonicalPath } from "./canonicalPath.ts";
 import * as ServerConfig from "./config.ts";
 import * as GitManager from "./git/GitManager.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
@@ -80,13 +81,23 @@ function sameProjectWorktreePolicies(left: ServerSettings, right: ServerSettings
   );
 }
 
+/** Statuses of a thread whose last run has finished (no run in flight). */
+const STORAGE_CLEANUP_IDLE_STATUSES: ReadonlySet<OrchestrationV2ThreadShell["status"]> = new Set([
+  "idle",
+  "failed",
+  "completed",
+  "cancelled",
+  "interrupted",
+  "rolled_back",
+]);
+
 /** Live sessions keep their cwd even when no turn is currently running. */
 export function storageCleanupThreadIdle(thread: OrchestrationV2ThreadShell, now: number): boolean {
   return (
     thread.branch !== null &&
     thread.worktreePath !== null &&
     thread.activeRunId === null &&
-    (thread.status === "idle" || thread.status === "failed") &&
+    STORAGE_CLEANUP_IDLE_STATUSES.has(thread.status) &&
     (thread.pendingBackgroundTasks?.length ?? 0) === 0 &&
     thread.pendingRuntimeRequest === null &&
     !threadHasQueuedTurnStart(thread, now)
@@ -105,6 +116,37 @@ export function storageCleanupActivityAt(thread: OrchestrationV2ThreadShell): nu
     ].flatMap((value) => (value == null ? [] : [DateTime.toEpochMillis(value)])),
   );
 }
+
+const insideRoot = (path: Path.Path, root: string, target: string) => {
+  const relative = path.relative(root, target);
+  return (
+    relative !== "" &&
+    relative !== ".." &&
+    !relative.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relative)
+  );
+};
+
+/**
+ * Whether `worktreePath` is a real directory under one of the canonical
+ * managed `roots`. Both sides are compared as real paths, so a stored path
+ * that reaches the managed directory through a symlinked ancestor (`~/.t3`
+ * after the move to `~/.d3`) still qualifies. The worktree directory itself
+ * being a symlink, or resolving outside every root, does not.
+ */
+export const isManagedWorktreeDirectory = Effect.fn("StorageCleanup.isManagedWorktreeDirectory")(
+  function* (
+    fs: FileSystem.FileSystem,
+    path: Path.Path,
+    roots: ReadonlyArray<string>,
+    worktreePath: string,
+  ) {
+    const realPath = yield* fs.realPath(worktreePath);
+    const realParent = yield* fs.realPath(path.dirname(worktreePath));
+    if (realPath !== path.join(realParent, path.basename(worktreePath))) return false;
+    return roots.some((root) => insideRoot(path, root, realPath));
+  },
+);
 
 export const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
@@ -126,24 +168,17 @@ export const make = Effect.gen(function* () {
     liveTerminals.set(terminal.threadId, threadTerminals);
   };
 
-  const inside = (root: string, target: string) => {
-    const relative = path.relative(root, target);
-    return (
-      relative !== "" &&
-      relative !== ".." &&
-      !relative.startsWith(`..${path.sep}`) &&
-      !path.isAbsolute(relative)
-    );
-  };
+  const inside = (root: string, target: string) => insideRoot(path, root, target);
+  // `worktreePath` is canonical; stored paths may reach it through a symlink.
   const hasTerminal = (worktreePath: string) =>
     [...liveTerminals.values()]
       .flatMap((entries) => [...entries.values()])
       .some((terminal) => {
         if (terminal.status !== "starting" && terminal.status !== "running") return false;
-        const cwd = path.resolve(terminal.cwd);
+        const cwd = canonicalPath(terminal.cwd);
         return (
           (terminal.worktreePath !== null &&
-            path.resolve(terminal.worktreePath) === worktreePath) ||
+            canonicalPath(terminal.worktreePath) === worktreePath) ||
           cwd === worktreePath ||
           inside(worktreePath, cwd)
         );
@@ -157,20 +192,16 @@ export const make = Effect.gen(function* () {
   });
 
   // Local threads under another project need not have a worktreePath of their own.
-  const containsProjectRoot = Effect.fn("StorageCleanup.containsProjectRoot")(function* (
+  const containsProjectRoot = (
     worktreePath: string,
     projects: ReadonlyArray<{ readonly workspaceRoot: string }>,
-  ) {
+  ) => {
     for (const project of projects) {
-      const projectPath = path.resolve(project.workspaceRoot);
+      const projectPath = canonicalPath(project.workspaceRoot);
       if (projectPath === worktreePath || inside(worktreePath, projectPath)) return true;
-      const realPath = yield* fs
-        .realPath(projectPath)
-        .pipe(Effect.orElseSucceed(() => projectPath));
-      if (realPath === worktreePath || inside(worktreePath, realPath)) return true;
     }
     return false;
-  });
+  };
 
   const cleanWorktrees = Effect.fn("StorageCleanup.cleanWorktrees")(function* (
     serverSettings: ServerSettings,
@@ -214,16 +245,20 @@ export const make = Effect.gen(function* () {
     const refreshedDefaultRefs = new Map<string, Set<string>>();
     const groups = Map.groupBy(
       snapshot.threads.filter((thread) => thread.worktreePath !== null),
-      (thread) => path.resolve(thread.worktreePath!),
+      (thread) => canonicalPath(thread.worktreePath!),
     );
     const candidates = [
       ...[...groups.values()].flatMap((group) => (group.length === 1 ? [group[0]!] : [])),
-      ...deletedThreads.filter((thread) => !groups.has(path.resolve(thread.worktreePath!))),
+      ...deletedThreads.filter((thread) => !groups.has(canonicalPath(thread.worktreePath!))),
     ];
     for (const thread of candidates) {
       const settings = resolveWorktreeCleanup(serverSettings, thread.projectId);
       if (!worktreeCleanupEnabled(settings)) continue;
+      // Stored form, handed to git and the filesystem as recorded. The
+      // canonical form is for comparisons: old paths reach the data folder
+      // through the `~/.t3` symlink while new ones are under `~/.d3`.
       const worktreePath = path.resolve(thread.worktreePath!);
+      const canonicalWorktreePath = canonicalPath(worktreePath);
       const deleted = "workspaceRoot" in thread;
       const project = deleted
         ? { workspaceRoot: thread.workspaceRoot }
@@ -231,18 +266,13 @@ export const make = Effect.gen(function* () {
       if (
         project === undefined ||
         (!deleted && !storageCleanupThreadIdle(thread, now)) ||
-        hasTerminal(worktreePath)
+        hasTerminal(canonicalWorktreePath)
       )
         continue;
       yield* Effect.gen(function* () {
         if (!(yield* fs.exists(worktreePath))) return;
-        // Roots are canonical, so compare canonical paths. A symlinked parent
-        // (a linked drive) is fine; a symlinked worktree directory is not.
-        const realPath = yield* fs.realPath(worktreePath);
-        const realParent = yield* fs.realPath(path.dirname(worktreePath));
-        if (realPath !== path.join(realParent, path.basename(worktreePath))) return;
-        if (!roots.some((root) => inside(root, realPath))) return;
-        if (yield* containsProjectRoot(worktreePath, [project, ...snapshot.projects])) return;
+        if (!(yield* isManagedWorktreeDirectory(fs, path, roots, worktreePath))) return;
+        if (containsProjectRoot(canonicalWorktreePath, [project, ...snapshot.projects])) return;
         // A linked worktree has a .git file. Never remove a main checkout.
         if ((yield* fs.stat(path.join(worktreePath, ".git"))).type !== "File") return;
         const status = yield* git.statusDetailsLocal(worktreePath);
@@ -309,12 +339,14 @@ export const make = Effect.gen(function* () {
         // Re-read after Git/host calls so a queued turn, resumed session or new
         // thread sharing this path cancels the removal.
         const latestSnapshot = yield* readThreads();
-        if (yield* containsProjectRoot(worktreePath, [project, ...latestSnapshot.projects])) return;
+        if (containsProjectRoot(canonicalWorktreePath, [project, ...latestSnapshot.projects]))
+          return;
         const latest = latestSnapshot.threads.filter(
           (entry) =>
-            entry.worktreePath !== null && path.resolve(entry.worktreePath) === worktreePath,
+            entry.worktreePath !== null &&
+            canonicalPath(entry.worktreePath) === canonicalWorktreePath,
         );
-        if (hasTerminal(worktreePath)) return;
+        if (hasTerminal(canonicalWorktreePath)) return;
         if (deleted) {
           if (
             latest.length > 0 ||
@@ -346,8 +378,8 @@ export const make = Effect.gen(function* () {
         );
         if (
           sessions.some((session) => {
-            const cwd = path.resolve(session.cwd);
-            return cwd === worktreePath || inside(worktreePath, cwd);
+            const cwd = canonicalPath(session.cwd);
+            return cwd === canonicalWorktreePath || inside(canonicalWorktreePath, cwd);
           })
         )
           return;
