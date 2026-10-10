@@ -136,15 +136,19 @@ export function formatCliCommand(input: {
   return `${runner} ${suggestedPackageSpec(input.version)} ${input.subcommand}`;
 }
 
-/** `formatCliCommand` against this process's real entry path and version. */
+/**
+ * `formatCliCommand` against this process's real entry path and version. A
+ * source checkout has no `t3` of its own, and one on PATH is a different build
+ * that may lack the subcommand, so it re-runs this exact Node and entry script.
+ */
 export const resolveCliCommand = (subcommand: string) =>
-  Effect.map(HostProcessArguments, (processArguments) =>
-    formatCliCommand({
-      subcommand,
-      entryPath: processArguments[1] ?? "",
-      version: packageJson.version,
-    }),
-  );
+  Effect.gen(function* () {
+    const entryPath = (yield* HostProcessArguments)[1] ?? "";
+    if (entryPath.endsWith(".ts")) {
+      return `${yield* HostProcessExecutablePath} ${entryPath} ${subcommand}`;
+    }
+    return formatCliCommand({ subcommand, entryPath, version: packageJson.version });
+  });
 
 /**
  * `t3 <subcommand>` as root, for setup a person runs once on the host. `sudo`
@@ -159,7 +163,10 @@ export const resolveRootCliCommand = (subcommand: string) =>
     const systemNode = ROOT_PATH_DIRECTORIES.some((directory) =>
       executablePath.startsWith(`${directory}/`),
     );
-    return systemNode ? `sudo ${command}` : `sudo env "PATH=$PATH" ${command}`;
+    // An absolute path needs no PATH lookup.
+    return systemNode || command.startsWith("/")
+      ? `sudo ${command}`
+      : `sudo env "PATH=$PATH" ${command}`;
   });
 
 /** Debian and Ubuntu's sudo `secure_path`, minus snap. */

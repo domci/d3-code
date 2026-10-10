@@ -122,6 +122,12 @@ it.effect("keeps a user-installed Node reachable when the command runs under sud
         "/home/theo/.local/lib/node_modules/t3/dist/bin.mjs",
       ),
     ).toBe('sudo env "PATH=$PATH" t3 browser setup');
+    // A source checkout re-runs itself; a `t3` on PATH is some other build.
+    expect(
+      yield* command("/home/theo/.volta/bin/node", "/home/theo/Code/t3code/apps/server/src/bin.ts"),
+    ).toBe(
+      "sudo /home/theo/.volta/bin/node /home/theo/Code/t3code/apps/server/src/bin.ts browser setup",
+    );
   }),
 );
 
