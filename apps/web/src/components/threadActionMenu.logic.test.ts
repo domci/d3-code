@@ -132,6 +132,9 @@ describe("buildThreadActionMenuItems", () => {
     });
     expect(blocked.find((item) => item.id === "fork-here")?.disabled).toBe(true);
     expect(blocked.map((item) => item.id)).not.toContain("fork-in-worktree");
+    const running = buildThreadActionMenuItems({ ...baseState, isRunning: true, fork });
+    expect(running.find((item) => item.id === "fork-here")?.disabled).toBe(false);
+    expect(running.find((item) => item.id === "fork-in-worktree")?.disabled).toBe(false);
   });
 
   it("offers working directory and branch name copies, branch only when present", () => {

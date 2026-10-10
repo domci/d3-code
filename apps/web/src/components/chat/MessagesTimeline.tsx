@@ -2547,6 +2547,18 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
             copyStreaming={row.assistantCopyStreaming}
           />
         ) : null}
+        {row.interimAssistant && !row.showAssistantMeta && row.projectedItem ? (
+          // Mid-turn messages carry no meta row; give them the fork control only.
+          // No per-row item-support subscription here: capabilities are left to
+          // the server's portable fallback (see canForkProjectedAssistantItem).
+          <div className="mt-1 flex items-center text-xs opacity-0 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover/assistant:opacity-100">
+            <AssistantForkControl
+              projectedItem={row.projectedItem}
+              capabilities={undefined}
+              final={false}
+            />
+          </div>
+        ) : null}
       </div>
     </>
   );
@@ -2558,18 +2570,43 @@ function AssistantForkButton({
   readonly projectedItem: NonNullable<Extract<TimelineRow, { kind: "message" }>["projectedItem"]>;
 }) {
   const ctx = use(TimelineRowCtx);
-  const [busy, setBusy] = useState(false);
   const support = useV2ItemSupport({
     environmentId: ctx.activeThreadEnvironmentId,
     sourceThreadId: projectedItem.sourceThreadId,
     sourceItemId: projectedItem.sourceItemId,
   });
-  const canFork = canForkProjectedAssistantItem({
-    projectedItem,
-    capabilities: support.providerSession?.capabilities,
-  });
+  return (
+    <AssistantForkControl
+      projectedItem={projectedItem}
+      capabilities={support.providerSession?.capabilities}
+      final
+    />
+  );
+}
+
+/**
+ * Forks are per run: every assistant message of a run forks at the end of
+ * that run, so interim messages say so. A run still in flight has no stable
+ * end yet, so its messages get no control.
+ */
+function AssistantForkControl({
+  projectedItem,
+  capabilities,
+  final,
+}: {
+  readonly projectedItem: NonNullable<Extract<TimelineRow, { kind: "message" }>["projectedItem"]>;
+  readonly final: boolean;
+  readonly capabilities: Parameters<typeof canForkProjectedAssistantItem>[0]["capabilities"];
+}) {
+  const ctx = use(TimelineRowCtx);
+  const { isWorking, latestRunId } = use(TimelineRowActivityCtx);
+  const [busy, setBusy] = useState(false);
+  const runInFlight =
+    isWorking && projectedItem.item.runId !== null && projectedItem.item.runId === latestRunId;
+  const canFork = canForkProjectedAssistantItem({ projectedItem, capabilities, runInFlight });
 
   if (!canFork || projectedItem.item.runId === null) return null;
+  const label = final ? "Fork from this response" : "Fork from the end of this turn";
   const runId = projectedItem.item.runId;
   const fork = (newWorktree?: { readonly baseBranch: string }) => {
     setBusy(true);
@@ -2588,6 +2625,7 @@ function AssistantForkButton({
         environmentId={ctx.activeThreadEnvironmentId}
         source={ctx.forkWorktreeSource}
         busy={busy}
+        label={label}
         onFork={fork}
       />
     );
@@ -2603,13 +2641,13 @@ function AssistantForkButton({
             variant="ghost"
             disabled={busy}
             onClick={() => fork()}
-            aria-label="Fork from this response"
+            aria-label={label}
           />
         }
       >
         <GitForkIcon className={cn("size-3", busy && "animate-pulse")} />
       </TooltipTrigger>
-      <TooltipPopup side="top">Fork from this response</TooltipPopup>
+      <TooltipPopup side="top">{label}</TooltipPopup>
     </Tooltip>
   );
 }

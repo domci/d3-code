@@ -103,7 +103,8 @@ export interface ThreadActionMenuState {
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
   /**
    * Thread forking. Omitted on surfaces that cannot fork. `canFork` is false
-   * while the thread has no finished run or is still running; the worktree
+   * while the thread has no run to fork from (a running thread forks its last
+   * completed turn); the worktree
    * item shows only with a base branch (git project, source-control access).
    */
   readonly fork?: {

@@ -146,9 +146,10 @@ export function useThreadActionMenu(input: {
           (candidate) =>
             candidate.environmentId === thread.environmentId && candidate.id === thread.projectId,
         );
-        // Latest stable fork needs a finished run and no run in flight; the
-        // server still has the last word (it wants a completed, checkpointed run).
-        const canFork = thread.latestRun !== null && threadRuntimeCanArchive(thread.runtime);
+        // Latest stable fork works while a run is in flight (it forks the last
+        // completed turn); it needs at least one run, and the server still has
+        // the last word (it wants a completed, checkpointed run).
+        const canFork = thread.latestRun !== null;
         // A thread with a branch is in a git project already; only ask git for
         // the project's branch (which can time out before status loads) without one.
         const canCreateWorktree =

@@ -24,11 +24,13 @@ export function ForkThreadMenu({
   environmentId,
   source,
   busy,
+  label = "Fork from this response",
   onFork,
 }: {
   environmentId: EnvironmentId;
   source: ForkWorktreeSource;
   busy: boolean;
+  label?: string;
   onFork: (newWorktree?: { readonly baseBranch: string }) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -52,7 +54,7 @@ export function ForkThreadMenu({
                   size="xs"
                   variant="ghost"
                   disabled={busy}
-                  aria-label="Fork from this response"
+                  aria-label={label}
                 />
               }
             />
@@ -60,7 +62,7 @@ export function ForkThreadMenu({
         >
           <GitForkIcon className={cn("size-3", busy && "animate-pulse")} />
         </TooltipTrigger>
-        <TooltipPopup side="top">Fork from this response</TooltipPopup>
+        <TooltipPopup side="top">{label}</TooltipPopup>
       </Tooltip>
       <PopoverPopup side="top" align="start" width="sm" padding="compact">
         {choosingBase ? (
