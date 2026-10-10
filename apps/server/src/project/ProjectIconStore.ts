@@ -7,6 +7,7 @@
  *
  * @module ProjectIconStore
  */
+import { canonicalPath } from "../canonicalPath.ts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -93,12 +94,13 @@ export const make = Effect.gen(function* () {
     return finalPath;
   });
 
-  /** Deletes a stored icon file; paths outside the managed directory are never touched. */
+  /** Deletes a stored icon file; paths outside the managed directory are never touched.
+   * Compared by real path: icons stored before the data folder moved to `~/.d3` read `~/.t3/...`. */
   const remove = Effect.fn("ProjectIconStore.remove")(function* (
     iconPath: string | null | undefined,
   ) {
     if (!iconPath) return;
-    const relative = path.relative(iconsDir, path.resolve(iconPath));
+    const relative = path.relative(canonicalPath(iconsDir), canonicalPath(iconPath));
     if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) return;
     if (relative.includes(path.sep)) return;
     yield* fileSystem

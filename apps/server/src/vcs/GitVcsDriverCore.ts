@@ -37,6 +37,7 @@ import { parseT3ProjectFile } from "@t3tools/shared/t3ProjectFile";
 import { resolveProjectFileBackedSetting } from "@t3tools/shared/projectSettings";
 import { gitCommandDuration, gitCommandsTotal, withMetrics } from "../observability/Metrics.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
+import { canonicalPath } from "../canonicalPath.ts";
 import { buildWorktreePath, resolveWorktreesDirectory } from "../worktreesDirectory.ts";
 import {
   parseRemoteNames,
@@ -3305,15 +3306,29 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         repositoryPaths.gitCommonDir,
         input.refresh === true,
       );
+      // Git prints the real path for a main checkout but the registered path
+      // for a linked worktree, and `~/.t3` is a symlink to `~/.d3` after the
+      // data folder move. Compare real paths, and report the caller's own
+      // spelling of `cwd` so clients can match it against stored paths.
+      const worktreeRootReal =
+        repositoryPaths.worktreeRoot === null ? null : canonicalPath(repositoryPaths.worktreeRoot);
+      const cwdReal = canonicalPath(input.cwd);
       const hasCurrentWorktreeBranch =
-        repositoryPaths.worktreeRoot !== null &&
-        snapshot.localBranches.some((ref) => ref.worktreePath === repositoryPaths.worktreeRoot);
-      const localBranches = snapshot.localBranches.map((ref) => ({
-        ...ref,
-        current: hasCurrentWorktreeBranch
-          ? ref.worktreePath === repositoryPaths.worktreeRoot
-          : ref.name === repositoryPaths.currentBranch,
-      }));
+        worktreeRootReal !== null &&
+        snapshot.localBranches.some(
+          (ref) =>
+            ref.worktreePath !== null && canonicalPath(ref.worktreePath) === worktreeRootReal,
+        );
+      const localBranches = snapshot.localBranches.map((ref) => {
+        const real = ref.worktreePath === null ? null : canonicalPath(ref.worktreePath);
+        return {
+          ...ref,
+          ...(real === cwdReal ? { worktreePath: path.resolve(input.cwd) } : {}),
+          current: hasCurrentWorktreeBranch
+            ? real === worktreeRootReal
+            : ref.name === repositoryPaths.currentBranch,
+        };
+      });
       const combinedBranches = input.includeMatchingRemoteRefs
         ? [...localBranches, ...snapshot.remoteBranches]
         : dedupeRemoteBranchesWithLocalMatches([...localBranches, ...snapshot.remoteBranches]);
@@ -3744,9 +3759,10 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   // worktrees directory) qualify, and only when empty.
   const pruneEmptyIdDirectory = (worktreePath: string) => {
     const parent = path.dirname(path.resolve(worktreePath));
+    // Real paths: a stored `~/.t3/...` path reaches `~/.d3/worktrees` through a symlink.
     const ours =
       /^[0-9a-f]{8}(?:-[0-9a-f]{4})?$/.test(path.basename(parent)) ||
-      path.dirname(parent) === path.resolve(worktreesDir);
+      canonicalPath(path.dirname(parent)) === canonicalPath(worktreesDir);
     return ours
       ? fileSystem.readDirectory(parent).pipe(
           Effect.flatMap((entries) =>

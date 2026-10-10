@@ -25,6 +25,7 @@ import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 
+import { canonicalPath } from "../canonicalPath.ts";
 import * as ServerConfig from "../config.ts";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
@@ -294,12 +295,18 @@ const make = Effect.gen(function* () {
       const id = yield* crypto.randomUUIDv4.pipe(
         Effect.mapError((cause) => new ScratchProjectError({ workspaceRoot, cause })),
       );
+      // Project roots are matched as strings, so a Scratch project registered
+      // as `~/.t3/scratch` before the data folder moved to `~/.d3` is looked up
+      // by that spelling instead of being created a second time.
+      const registeredRoot = (yield* projects.listShells().pipe(Effect.orElseSucceed(() => [])))
+        .map((project) => project.workspaceRoot)
+        .find((root) => canonicalPath(root) === canonicalPath(workspaceRoot));
       const bootstrapped = yield* projects
         .bootstrap({
           commandId: CommandId.make(`scratch-project:${id}`),
           projectId: ProjectId.make(id),
           title: "No project",
-          workspaceRoot,
+          workspaceRoot: registeredRoot ?? workspaceRoot,
         })
         .pipe(
           // bootstrap looks the root up before taking the workspace lock, so a
@@ -331,7 +338,7 @@ const make = Effect.gen(function* () {
   const isScratchProject = (projectId: ProjectId, root: string) =>
     projects.getById(projectId).pipe(
       Effect.map(
-        Option.exists((project) => path.resolve(project.workspaceRoot) === path.resolve(root)),
+        Option.exists((project) => canonicalPath(project.workspaceRoot) === canonicalPath(root)),
       ),
       // An unreadable project is not Scratch; the launch reports its own
       // project lookup failure.

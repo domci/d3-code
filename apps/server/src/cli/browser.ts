@@ -26,6 +26,7 @@ import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import * as PreviewBrowserHost from "../preview/PreviewBrowserHost.ts";
+import { resolveDefaultHome } from "@t3tools/shared/defaultHome";
 import { resolveBaseDir } from "../os-jank.ts";
 import { baseDirFlag } from "./config.ts";
 import { resolveRootCliCommand } from "./invocation.ts";
@@ -58,7 +59,7 @@ const runStep = Effect.fn("browserSetup.runStep")(function* (
 
 /**
  * The T3 home to check. Under `sudo` the process home is root's, so an
- * unspecified home falls back to the invoking user's `~/.t3`.
+ * unspecified home falls back to the invoking user's default home.
  */
 const setupBaseDir = Effect.fn("browserSetup.baseDir")(function* (explicit: Option.Option<string>) {
   const env = yield* HostProcessEnvironment;
@@ -72,7 +73,7 @@ const setupBaseDir = Effect.fn("browserSetup.baseDir")(function* (explicit: Opti
     .pipe(Effect.orElseSucceed(() => ""));
   const home = entry.trim().split(":")[5];
   const path = yield* Path.Path;
-  return home ? path.join(home, ".t3") : yield* resolveBaseDir(undefined);
+  return home ? resolveDefaultHome(home) : yield* resolveBaseDir(undefined);
 });
 
 /** Whether apt has an installable candidate for `name`. */

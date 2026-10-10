@@ -43,6 +43,7 @@ vi.mock("electron", () => ({
 }));
 
 vi.mock("node:fs", () => ({
+  existsSync: () => false,
   readFileSync: () => "{}",
   mkdirSync: mkdirSyncMock,
   writeFileSync: writeFileSyncMock,

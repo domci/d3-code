@@ -1,3 +1,5 @@
+// @effect-diagnostics nodeBuiltinImport:off - builds a real symlinked data dir.
+import * as NodeFS from "node:fs";
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { CommandId, GitCommandError, ProjectId, ThreadId } from "@t3tools/contracts";
@@ -193,6 +195,38 @@ it.effect("recreates the Scratch folder after it is deleted", () =>
         threadId: ThreadId.make("thread-after-delete"),
         text: "Still works",
       });
+      assert.isTrue(yield* fileSystem.exists(Option.getOrThrow(folder)));
+    }),
+  ),
+);
+
+it.effect("recognises a Scratch project stored through a symlinked data dir", () =>
+  withScratch(({ baseDir }) =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const projects = yield* ProjectService.ProjectService;
+      const scratch = yield* ManagedProjectFolders.ManagedProjectFolders;
+      // `<base>-legacy` -> `<base>`, as `~/.t3` -> `~/.d3` after the move.
+      const legacy = `${baseDir}-legacy`;
+      NodeFS.symlinkSync(baseDir, legacy);
+      yield* Effect.addFinalizer(() => Effect.sync(() => NodeFS.rmSync(legacy, { force: true })));
+      const created = yield* projects.create({
+        commandId: CommandId.make("legacy-scratch"),
+        projectId: ProjectId.make("legacy-scratch"),
+        title: "No project",
+        workspaceRoot: path.join(legacy, "scratch"),
+        createWorkspaceRootIfMissing: true,
+      });
+
+      const { projectId } = yield* scratch.ensureScratchProject;
+      const folder = yield* scratch.folderForThread({
+        projectId,
+        threadId: ThreadId.make("thread-legacy"),
+        text: "Still scratch",
+      });
+
+      assert.equal(projectId, created.id);
       assert.isTrue(yield* fileSystem.exists(Option.getOrThrow(folder)));
     }),
   ),

@@ -49,6 +49,23 @@ describe("ProjectIconStore", () => {
     }).pipe(Effect.provide(layerTest)),
   );
 
+  it.effect("removes an icon whose stored path goes through a symlinked ancestor", () =>
+    Effect.gen(function* () {
+      const { attachmentsDir, baseDir } = yield* ServerConfig.ServerConfig;
+      const store = yield* make;
+      const id = writePending(attachmentsDir, PNG);
+      const iconPath = yield* store.claim(`attachment:${id}`);
+      const alias = `${baseDir}-alias`;
+      NodeFS.symlinkSync(baseDir, alias);
+      try {
+        yield* store.remove(NodePath.join(alias, NodePath.relative(baseDir, iconPath)));
+        assert.isFalse(NodeFS.existsSync(iconPath));
+      } finally {
+        NodeFS.rmSync(alias, { force: true });
+      }
+    }).pipe(Effect.provide(layerTest)),
+  );
+
   it.effect("rejects svg disguised as an image, oversize files and unknown ids", () =>
     Effect.gen(function* () {
       const { attachmentsDir } = yield* ServerConfig.ServerConfig;
