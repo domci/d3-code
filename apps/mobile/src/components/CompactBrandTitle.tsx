@@ -46,22 +46,24 @@ export function CompactBrandTitle(
       >
         Code
       </Text>
-      <View
-        className="rounded-full bg-subtle px-1.5 py-0.5"
-        style={
-          Platform.OS === "android"
-            ? { paddingHorizontal: 5.25 * scale, paddingVertical: 1.75 * scale }
-            : undefined
-        }
-      >
-        <Text
-          allowFontScaling={props.allowFontScaling}
-          className="font-t3-bold text-foreground-muted uppercase"
-          style={{ fontSize: 9 * scale, letterSpacing: 0.9 * scale }}
+      {stageLabel === null ? null : (
+        <View
+          className="rounded-full bg-subtle px-1.5 py-0.5"
+          style={
+            Platform.OS === "android"
+              ? { paddingHorizontal: 5.25 * scale, paddingVertical: 1.75 * scale }
+              : undefined
+          }
         >
-          {stageLabel}
-        </Text>
-      </View>
+          <Text
+            allowFontScaling={props.allowFontScaling}
+            className="font-t3-bold text-foreground-muted uppercase"
+            style={{ fontSize: 9 * scale, letterSpacing: 0.9 * scale }}
+          >
+            {stageLabel}
+          </Text>
+        </View>
+      )}
     </View>
   );
 }
