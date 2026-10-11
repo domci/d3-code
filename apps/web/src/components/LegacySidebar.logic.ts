@@ -108,13 +108,13 @@ export function groupThreadChildren<T extends SubagentTreeThread & { readonly cr
 
 /**
  * The threads that have a row under `roots`, top to bottom as rendered: each thread, then its
- * running subagents, its forks, and its finished subagents when `isFinishedOpen(parentKey)`.
+ * forks, and around them its running and finished subagents when `isSubagentsOpen(parentKey)`.
  */
 export function listThreadRows<T extends SubagentTreeThread & { readonly createdAt: string }>(
   roots: readonly T[],
   childrenByParentKey: ReadonlyMap<string, readonly T[]>,
   isRunning: (child: T) => boolean,
-  isFinishedOpen: (parentKey: string) => boolean,
+  isSubagentsOpen: (parentKey: string) => boolean,
 ): T[] {
   const rows: T[] = [];
   const visit = (thread: T) => {
@@ -124,9 +124,10 @@ export function listThreadRows<T extends SubagentTreeThread & { readonly created
       childrenByParentKey.get(key) ?? [],
       isRunning,
     );
-    for (const child of running) visit(child);
+    const open = isSubagentsOpen(key);
+    if (open) for (const child of running) visit(child);
     for (const child of forks) visit(child);
-    if (isFinishedOpen(key)) for (const child of finished) visit(child);
+    if (open) for (const child of finished) visit(child);
   };
   for (const root of roots) visit(root);
   return rows;
@@ -134,7 +135,7 @@ export function listThreadRows<T extends SubagentTreeThread & { readonly created
 
 /**
  * What has to open for the row of `threadKey` to be on screen: the Settled group and the
- * finished-subagent folds (parent keys) above it. Null when the thread has no row here.
+ * subagent folds (parent keys) above it. Null when the thread has no row here.
  * Used to reveal a thread once when it is navigated to; the user's toggles win afterwards.
  */
 export function resolveThreadReveal<T extends SubagentTreeThread>(
@@ -143,14 +144,13 @@ export function resolveThreadReveal<T extends SubagentTreeThread>(
     readonly settled: readonly T[];
     readonly childrenByParentKey: ReadonlyMap<string, readonly T[]>;
   },
-  isRunning: (child: T) => boolean,
   threadKey: string,
 ): { readonly settled: boolean; readonly foldedParentKeys: string[] } | null {
   const find = (thread: T, folds: string[]): string[] | null => {
     const key = subagentTreeKey(thread);
     if (key === threadKey) return folds;
     for (const child of tree.childrenByParentKey.get(key) ?? []) {
-      const folded = child.lineage.relationshipToParent !== "fork" && !isRunning(child);
+      const folded = child.lineage.relationshipToParent !== "fork";
       const found = find(child, folded ? [...folds, key] : folds);
       if (found) return found;
     }

@@ -195,20 +195,20 @@ describe("visible rows and reveal", () => {
   const isRunning = (thread: { id: string }) => thread.id === "busy";
   const tree = { active: [a], settled: [z], childrenByParentKey };
 
-  it("lists rows in render order and leaves out closed finished-subagent folds", () => {
+  it("lists rows in render order and leaves out closed subagent folds", () => {
     const rows = (open: readonly string[]) =>
       listThreadRows([a], childrenByParentKey, isRunning, (key) => open.includes(key)).map(
         (thread) => thread.id,
       );
-    expect(rows([])).toEqual(["a", "busy", "f"]);
+    expect(rows([])).toEqual(["a", "f"]);
     expect(rows(["e:a"])).toEqual(["a", "busy", "f", "done"]);
     expect(rows(["e:a", "e:done"])).toEqual(["a", "busy", "f", "done", "deep"]);
   });
 
   it("opens only the folds above the thread, and nothing for rows that are already visible", () => {
-    const reveal = (key: string) => resolveThreadReveal(tree, isRunning, key);
+    const reveal = (key: string) => resolveThreadReveal(tree, key);
     expect(reveal("e:a")).toEqual({ settled: false, foldedParentKeys: [] });
-    expect(reveal("e:busy")).toEqual({ settled: false, foldedParentKeys: [] });
+    expect(reveal("e:busy")).toEqual({ settled: false, foldedParentKeys: ["e:a"] });
     expect(reveal("e:f")).toEqual({ settled: false, foldedParentKeys: [] });
     expect(reveal("e:deep")).toEqual({ settled: false, foldedParentKeys: ["e:a", "e:done"] });
     expect(reveal("e:z")).toEqual({ settled: true, foldedParentKeys: [] });

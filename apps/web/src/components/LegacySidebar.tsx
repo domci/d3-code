@@ -349,7 +349,7 @@ interface SidebarThreadRowProps {
   /** Subagent children of this thread; the expander shows only when there are any. */
   subagentRunning?: number;
   subagentFinished?: number;
-  finishedSubagentsExpanded?: boolean;
+  subagentsExpanded?: boolean;
   onToggleSubagents?: (threadKey: string) => void;
   /** Set for a fork; `sourceTitle` is null when the source is not in the project's list. */
   fork?: { readonly sourceTitle: string | null };
@@ -412,7 +412,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     fork,
     subagentRunning = 0,
     subagentFinished = 0,
-    finishedSubagentsExpanded = false,
+    subagentsExpanded = false,
     onToggleSubagents,
     orderedProjectThreadKeys,
     isActive,
@@ -719,13 +719,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   );
   const handleSubagentsClick = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
-      // Nothing is folded while every subagent is still running: the count is part of the row.
-      if (subagentFinished === 0) return;
       event.preventDefault();
       event.stopPropagation();
       onToggleSubagents?.(threadKey);
     },
-    [onToggleSubagents, subagentFinished, threadKey],
+    [onToggleSubagents, threadKey],
   );
   const handleMoreClick = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -816,23 +814,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                     type="button"
                     data-thread-selection-safe
                     data-testid={`thread-subagents-${thread.id}`}
-                    aria-expanded={subagentFinished > 0 ? finishedSubagentsExpanded : undefined}
-                    aria-label={
-                      subagentFinished > 0
-                        ? `${finishedSubagentsExpanded ? "Hide" : "Show"} finished subagents (${describeSubagentCounts(subagentRunning, subagentFinished)})`
-                        : `Subagents: ${describeSubagentCounts(subagentRunning, subagentFinished)}`
-                    }
+                    aria-expanded={subagentsExpanded}
+                    aria-label={`${subagentsExpanded ? "Hide" : "Show"} subagents (${describeSubagentCounts(subagentRunning, subagentFinished)})`}
                     className="inline-flex shrink-0 cursor-pointer items-center rounded-sm text-sidebar-muted-foreground outline-hidden hover:text-sidebar-foreground focus-visible:ring-1 focus-visible:ring-ring"
                     onPointerDown={stopPropagationOnPointerDown}
                     onClick={handleSubagentsClick}
                   />
                 }
               >
-                {subagentFinished > 0 ? (
-                  <ChevronRightIcon
-                    className={cn("size-3", finishedSubagentsExpanded && "rotate-90")}
-                  />
-                ) : null}
+                <ChevronRightIcon className={cn("size-3", subagentsExpanded && "rotate-90")} />
                 <span className="text-3xs tabular-nums leading-none">
                   {subagentRunning + subagentFinished}
                 </span>
@@ -1130,9 +1120,9 @@ interface SidebarProjectThreadListProps {
   childrenByParentKey: ReadonlyMap<string, readonly SidebarThreadSummary[]>;
   /** Titles of the project's listed threads by key, for the fork tooltip. */
   threadTitleByKey: ReadonlyMap<string, string>;
-  /** Thread keys that are still working; finished subagents fold behind a toggle. */
+  /** Thread keys that are still working; they list first among a parent's subagents. */
   runningThreadKeys: ReadonlySet<string>;
-  /** Parent thread keys whose finished subagents are shown. */
+  /** Parent thread keys whose subagents are shown. */
   expandedSubagentParents: ReadonlySet<string>;
   toggleSubagents: (parentKey: string) => void;
   isSettledExpanded: boolean;
@@ -1257,7 +1247,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     } = groupThreadChildren(childrenByParentKey.get(threadKey) ?? [], (child) =>
       runningThreadKeys.has(scopedThreadKey(scopeThreadRef(child.environmentId, child.id))),
     );
-    const finishedExpanded = expandedSubagentParents.has(threadKey);
+    const subagentsExpanded = expandedSubagentParents.has(threadKey);
     const rowProps = {
       thread,
       depth,
@@ -1272,7 +1262,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
         : {}),
       subagentRunning: runningChildren.length,
       subagentFinished: finishedChildren.length,
-      finishedSubagentsExpanded: finishedExpanded,
+      subagentsExpanded: subagentsExpanded,
       onToggleSubagents: toggleSubagents,
       orderedProjectThreadKeys,
       isActive: activeRouteThreadKey === threadKey,
@@ -1302,11 +1292,13 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
         ) : (
           <SidebarThreadRow {...rowProps} />
         )}
-        {/* Running subagents sit directly under their parent, then forks (full sessions, always
-            shown); finished subagents fold below them. */}
-        {runningChildren.map((child) => renderThreadRow(child, depth + 1))}
+        {/* Subagents fold behind the parent's expander, running ones first; forks are full
+            sessions and always shown. */}
+        {subagentsExpanded
+          ? runningChildren.map((child) => renderThreadRow(child, depth + 1))
+          : null}
         {forkChildren.map((child) => renderThreadRow(child, depth + 1))}
-        {finishedExpanded
+        {subagentsExpanded
           ? finishedChildren.map((child) => renderThreadRow(child, depth + 1))
           : null}
       </Fragment>
@@ -1739,7 +1731,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     visibleProjectThreads,
   ]);
 
-  // The Settled group and each parent's finished subagents are folded by default. Navigating to
+  // The Settled group and each parent's subagents are folded by default. Navigating to
   // a thread inside a fold opens it once; a thread that moves into a fold while being viewed
   // (settled, or a subagent finishing) does not, and the toggles always win afterwards.
   const [isSettledExpanded, setSettledExpanded] = useState(false);
@@ -1767,7 +1759,6 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     if (activeRouteThreadKey === null || revealRef.current.done) return;
     const reveal = resolveThreadReveal(
       { active: activeProjectThreads, settled: settledProjectThreads, childrenByParentKey },
-      isRunningThread,
       activeRouteThreadKey,
     );
     if (reveal === null) return;
@@ -1776,24 +1767,18 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     if (reveal.foldedParentKeys.length > 0) {
       setExpandedSubagentParents((current) => new Set([...current, ...reveal.foldedParentKeys]));
     }
-  }, [
-    activeProjectThreads,
-    activeRouteThreadKey,
-    childrenByParentKey,
-    isRunningThread,
-    settledProjectThreads,
-  ]);
+  }, [activeProjectThreads, activeRouteThreadKey, childrenByParentKey, settledProjectThreads]);
   // The rows on screen, top to bottom, so a shift-click range covers exactly what is visible.
   const orderedProjectThreadKeys = useMemo(() => {
-    const isFinishedOpen = (parentKey: string) => expandedSubagentParents.has(parentKey);
+    const isSubagentsOpen = (parentKey: string) => expandedSubagentParents.has(parentKey);
     return [
-      ...listThreadRows(renderedThreads, childrenByParentKey, isRunningThread, isFinishedOpen),
+      ...listThreadRows(renderedThreads, childrenByParentKey, isRunningThread, isSubagentsOpen),
       ...(isSettledExpanded
         ? listThreadRows(
             settledProjectThreads,
             childrenByParentKey,
             isRunningThread,
-            isFinishedOpen,
+            isSubagentsOpen,
           )
         : []),
     ].map((thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)));
