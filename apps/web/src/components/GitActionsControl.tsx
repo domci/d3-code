@@ -1219,6 +1219,10 @@ export default function GitActionsControl({
   const gitStatusForActions = gitStatus;
   // Matches the diff panel's Changes view. Older servers only report uncommitted totals.
   const changesTotals = gitStatusForActions?.branchChanges ?? gitStatusForActions?.workingTree;
+  // The branch this one was cut from, which is also what Changes compares against.
+  const branchBaseRef = gitStatusForActions?.isDefaultRef
+    ? null
+    : (gitStatusForActions?.branchChanges?.baseRef ?? null);
 
   const allFiles = gitStatusForActions?.workingTree.files ?? [];
   const selectedFiles = allFiles.filter((f) => !excludedFiles.has(f.path));
@@ -1972,7 +1976,12 @@ export default function GitActionsControl({
           onClick={onOpenChanges}
         >
           <FileDiffIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} aria-hidden />
-          <span className="flex-1 text-left">Changes</span>
+          <span className="flex min-w-0 flex-1 items-baseline gap-1.5 text-left">
+            Changes
+            {branchBaseRef ? (
+              <span className="truncate text-2xs text-muted-foreground">from {branchBaseRef}</span>
+            ) : null}
+          </span>
           <span className="flex items-center gap-1 font-mono text-2xs tabular-nums">
             <span className="text-success">+{changesTotals?.insertions ?? 0}</span>
             <span className="text-destructive">-{changesTotals?.deletions ?? 0}</span>
