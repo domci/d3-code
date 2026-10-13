@@ -16,7 +16,7 @@ import {
   type VcsRef,
   type ThreadId,
 } from "@t3tools/contracts";
-import { ChevronDownIcon, GitBranchIcon } from "lucide-react";
+import { ChevronDownIcon, GitBranchIcon, GitForkIcon } from "lucide-react";
 import {
   useCallback,
   useDeferredValue,
@@ -45,6 +45,7 @@ import { cn } from "../lib/utils";
 import {
   THREAD_DETAILS_PANEL_CHEVRON_CLASS,
   THREAD_DETAILS_PANEL_ICON_CLASS,
+  THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS,
 } from "./chat/threadDetailsPanelStyles";
 import { ThreadDetailsPrRows } from "./chat/ThreadDetailsPrRows";
 import { parsePullRequestReference } from "../pullRequestReference";
@@ -253,6 +254,10 @@ export function BranchToolbarBranchSelector({
           input: { cwd: branchCwd },
         }),
   );
+  // The branch this one was cut from, which is also what Changes compares against.
+  const sourceBranch = branchStatusQuery.data?.isDefaultRef
+    ? null
+    : (branchStatusQuery.data?.branchChanges?.baseRef ?? null);
   const trimmedBranchQuery = branchQuery.trim();
   const deferredTrimmedBranchQuery = deferredBranchQuery.trim();
   // The server filters refs by substring, so it has to be given the sanitized
@@ -808,6 +813,13 @@ export function BranchToolbarBranchSelector({
             )}
           </ComboboxTrigger>
         </span>
+        {displayMode === "panel" && sourceBranch ? (
+          <div className={cn("flex items-center", THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS)}>
+            <GitForkIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} aria-hidden />
+            <span className="shrink-0 text-muted-foreground">Source branch:</span>
+            <MiddleTruncate value={sourceBranch} className="min-w-0 flex-1" />
+          </div>
+        ) : null}
         {displayMode === "panel" && prNumber !== undefined && prUrl !== undefined ? (
           <ThreadDetailsPrRows
             threadRef={threadRef}
