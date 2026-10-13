@@ -70,7 +70,7 @@ function RemoteEnvironmentRowsSkeleton() {
 }
 
 /**
- * The user's T3 Connect environments from relay discovery, each with a
+ * The user's D3 Connect environments from relay discovery, each with a
  * Connect button. The primary environment is always excluded; already-saved
  * environments are hidden unless `showSavedEnvironments` renders them with
  * their live connection state (used by onboarding, where the full device mesh
@@ -128,7 +128,7 @@ export function CloudEnvironmentConnectRows({
       .filter((environment) => environment.relayManaged)
       .map((environment) => [environment.environmentId, environment]),
   );
-  // Saved over another route only: T3 Connect would be an added fallback.
+  // Saved over another route only: D3 Connect would be an added fallback.
   const savedWithoutRelay = new Set(
     savedEnvironments
       .filter((environment) => !environment.relayManaged)
@@ -165,11 +165,11 @@ export function CloudEnvironmentConnectRows({
       toastManager.add({
         type: "success",
         title: savedWithoutRelay.has(environment.environmentId)
-          ? "T3 Connect route added"
+          ? "D3 Connect route added"
           : "Environment added",
         description: savedWithoutRelay.has(environment.environmentId)
-          ? `${environment.label} falls back to T3 Connect when its other routes are unreachable.`
-          : `Connecting to ${environment.label} through T3 Connect.`,
+          ? `${environment.label} falls back to D3 Connect when its other routes are unreachable.`
+          : `Connecting to ${environment.label} through D3 Connect.`,
       });
       return true;
     }
@@ -178,7 +178,7 @@ export function CloudEnvironmentConnectRows({
     }
     const cause = squashAtomCommandFailure(result);
     const message =
-      cause instanceof Error ? cause.message : "Could not connect the T3 Connect environment.";
+      cause instanceof Error ? cause.message : "Could not connect the D3 Connect environment.";
     const traceId = findErrorTraceId(cause);
     console.error("[t3-connect] Could not connect environment", { message, traceId, cause });
     toastManager.add({
@@ -198,7 +198,7 @@ export function CloudEnvironmentConnectRows({
   };
 
   // During onboarding selection a machine saved over another route already
-  // has its own row elsewhere, and selecting it must not add a T3 Connect
+  // has its own row elsewhere, and selecting it must not add a D3 Connect
   // route as a side effect, so it is left out here.
   const visibleEnvironments = [...environmentsState.environments.values()].filter(
     ({ environment }) =>
@@ -300,7 +300,7 @@ export function CloudEnvironmentConnectRows({
       return (
         <div className={ITEM_ROW_CLASSNAME}>
           <p className="text-sm font-medium text-destructive">
-            Could not load T3 Connect environments
+            Could not load D3 Connect environments
           </p>
           <p className="mt-1 text-xs text-muted-foreground">{discoveryProblem}</p>
           <Button
@@ -364,23 +364,23 @@ export function CloudEnvironmentConnectRows({
             ? "bg-warning"
             : "bg-muted-foreground/35";
     const notAdded = savedWithoutRelay.has(environment.environmentId)
-      ? "Saved without T3 Connect"
+      ? "Saved without D3 Connect"
       : "Not added";
     const statusText =
       unsupported && !savedEnvironment
-        ? `T3 Connect · ${notAdded} · Client not supported`
+        ? `D3 Connect · ${notAdded} · Client not supported`
         : offlineReason !== null
           ? offlineReason
           : savedConnection
             ? savedConnection.statusText
             : availability === "online"
-              ? `T3 Connect · ${notAdded} · Relay online`
+              ? `D3 Connect · ${notAdded} · Relay online`
               : availability === "offline"
-                ? `T3 Connect · ${notAdded} · Relay offline`
+                ? `D3 Connect · ${notAdded} · Relay offline`
                 : availability === "checking"
-                  ? `T3 Connect · ${notAdded} · Checking relay status…`
+                  ? `D3 Connect · ${notAdded} · Checking relay status…`
                   : (Option.getOrNull(error)?.message ??
-                    `T3 Connect · ${notAdded} · Relay status unavailable`);
+                    `D3 Connect · ${notAdded} · Relay status unavailable`);
     if (selection) {
       return (
         <label

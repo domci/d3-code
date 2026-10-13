@@ -7,7 +7,7 @@ const ThemedPath = withUniwind(Path);
 /**
  * The "D3" brand mark. Width derives from the viewBox aspect ratio.
  */
-export function T3Wordmark(props: {
+export function D3Wordmark(props: {
   readonly height: number;
   readonly color?: ColorValue;
   readonly colorClassName?: string;

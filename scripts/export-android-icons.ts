@@ -1,12 +1,10 @@
 #!/usr/bin/env node
 
-// Renders the Android launcher and splash artwork from the Icon Composer SVG sources.
+// Keeps the D3 keyboard inside Android's adaptive and splash safe zones.
 //
-// Icon Composer exports already contain a rounded-square silhouette, and Android masks
-// the central 72dp of a 108dp adaptive canvas, so exporting them as a foreground produces
-// a double-framed icon with the letters cropped by the mask. Instead, each variant gets a
-// full-bleed background layer (the artwork behind the wordmark) and a shared transparent
-// foreground that keeps the wordmark inside the safe zone.
+// Full application artwork contains a rounded-square silhouette. Android masks the
+// central 72dp of a 108dp adaptive canvas, so it needs the transparent keyboard master
+// over a full-bleed channel background instead of a second rounded-square frame.
 //
 // The Android 12+ splash screen masks its icon to a circle covering the central two thirds
 // of a 288dp canvas, which is the same proportion the launcher crops. Composing the two
@@ -20,7 +18,9 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import { Command, Flag } from "effect/cli";
 import sharp from "sharp";
+import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
 
 type IconVariant = "dev" | "nightly" | "prod";
 
@@ -45,6 +45,15 @@ export class AndroidIconRenderError extends Schema.TaggedError<AndroidIconRender
   "AndroidIconRenderError",
   { layer: Schema.String, cause: Schema.Defect() },
 ) {}
+
+export class AndroidIconAssetsStaleError extends Schema.TaggedError<AndroidIconAssetsStaleError>()(
+  "AndroidIconAssetsStaleError",
+  { paths: Schema.Array(Schema.String) },
+) {
+  override get message(): string {
+    return `Generated Android icons are stale:\n${this.paths.join("\n")}`;
+  }
+}
 
 const wordmarkTransform = (size: number) => {
   const scale = (size * WORDMARK_FRACTION) / TEXT.width;
@@ -107,13 +116,16 @@ const renderForeground = Effect.fn("androidIcons.renderForeground")(function* (
   repositoryRoot: string,
   size: number,
 ) {
-  const text = yield* readLayerSource(repositoryRoot, "prod", "text.svg");
-  const paths = text.match(/<path[^>]*\/>/g) ?? [];
-  return yield* rasterize(
-    "foreground",
-    canvasSvg(size, `<g transform="${wordmarkTransform(size)}">${paths.join("")}</g>`),
-    size,
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const source = Buffer.from(
+    yield* fs.readFile(path.join(repositoryRoot, BRAND_ASSET_PATHS.sourceAndroidForegroundPng)),
   );
+  if (size === ADAPTIVE_CANVAS) return source;
+  return yield* Effect.tryPromise({
+    try: () => sharp(source).resize(size, size).png().toBuffer(),
+    catch: (cause) => new AndroidIconRenderError({ layer: "foreground", cause }),
+  });
 });
 
 const renderDevelopmentBackground = Effect.fn("androidIcons.renderDevelopmentBackground")(
@@ -206,12 +218,33 @@ const renderSplashIcon = Effect.fn("androidIcons.renderSplashIcon")(function* (
   return yield* composite(`${variant}-splash`, background, [{ input: foreground }]);
 });
 
-const exportAndroidIcons = Effect.gen(function* () {
+export const exportAndroidIcons = Effect.fn("exportAndroidIcons")(function* (checkOnly: boolean) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const repositoryRoot = path.resolve(import.meta.dirname, "..");
+  const mark = yield* readLayerSource(repositoryRoot, "prod", "text.svg");
+  const markPaths = (mark.match(/<path[^>]*\/>/g) ?? []).join("");
   const outputs = [
     ["android-icon-foreground.png", yield* renderForeground(repositoryRoot, ADAPTIVE_CANVAS)],
+    [
+      "android-icon-mark.png",
+      yield* rasterize(
+        "monochrome",
+        canvasSvg(
+          ADAPTIVE_CANVAS,
+          `<g transform="${wordmarkTransform(ADAPTIVE_CANVAS)}">${markPaths}</g>`,
+        ),
+        ADAPTIVE_CANVAS,
+      ),
+    ],
+    [
+      "android-notification-icon.png",
+      yield* rasterize(
+        "notification",
+        `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="7 29 111 74">${markPaths}</svg>`,
+        96,
+      ),
+    ],
     [
       "android-icon-background-dev.png",
       yield* renderDevelopmentBackground(repositoryRoot, ADAPTIVE_CANVAS),
@@ -224,6 +257,20 @@ const exportAndroidIcons = Effect.gen(function* () {
     ["android-splash-icon-nightly.png", yield* renderSplashIcon(repositoryRoot, "nightly")],
     ["android-splash-icon-prod.png", yield* renderSplashIcon(repositoryRoot, "prod")],
   ] as const;
+  if (checkOnly) {
+    const stale = yield* Effect.filter(outputs, ([name, contents]) =>
+      Effect.gen(function* () {
+        const target = path.join(repositoryRoot, OUTPUT_DIRECTORY, name);
+        return (
+          !(yield* fs.exists(target)) || !Buffer.from(yield* fs.readFile(target)).equals(contents)
+        );
+      }),
+    );
+    if (stale.length > 0)
+      return yield* new AndroidIconAssetsStaleError({ paths: stale.map(([name]) => name) });
+    yield* Console.log(`All ${outputs.length} generated Android D3 icon assets are current.`);
+    return;
+  }
   for (const [name, contents] of outputs) {
     yield* fs.writeFile(path.join(repositoryRoot, OUTPUT_DIRECTORY, name), contents);
     yield* Console.log(`wrote ${OUTPUT_DIRECTORY}/${name}`);
@@ -231,5 +278,12 @@ const exportAndroidIcons = Effect.gen(function* () {
 });
 
 if (import.meta.main) {
-  exportAndroidIcons.pipe(Effect.provide(NodeServices.layer), NodeRuntime.runMain);
+  Command.run(
+    Command.make(
+      "export-android-icons",
+      { check: Flag.Boolean("check").pipe(Flag.withDefault(false)) },
+      ({ check }) => exportAndroidIcons(check),
+    ),
+    { version: "0.0.0" },
+  ).pipe(Effect.provide(NodeServices.layer), NodeRuntime.runMain);
 }

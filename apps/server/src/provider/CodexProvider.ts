@@ -347,8 +347,8 @@ const requestAllCodexModels = Effect.fn("requestAllCodexModels")(function* (
 export function buildCodexInitializeParams(): CodexSchema.V1InitializeParams {
   return {
     clientInfo: {
-      name: "T3 Code",
-      title: "T3 Code",
+      name: "D3 Code",
+      title: "D3 Code",
       version: packageJson.version,
     },
     capabilities: {

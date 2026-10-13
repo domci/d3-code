@@ -948,7 +948,7 @@ export const DESKTOP_FILE_EXCLUSIONS = [
   "!**/node_modules/@cursor/sdk-*/**/*",
   "!apps/desktop/prod-resources/cursor-sdk",
   "!apps/desktop/prod-resources/cursor-sdk/**/*",
-  // T3 Code always passes the user's installed Claude executable to the SDK,
+  // D3 Code always passes the user's installed Claude executable to the SDK,
   // so the SDK's optional platform packages (each a ~200MB bundled executable)
   // are dead weight. The trailing dash keeps the SDK's own JS package.
   "!**/node_modules/@anthropic-ai/claude-agent-sdk-*/**/*",
@@ -2726,7 +2726,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       },
       protocols: [
         {
-          name: "T3 Code",
+          name: "D3 Code",
           schemes: ["t3code", "t3code-dev"],
         },
       ],
@@ -2786,7 +2786,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       // t3code:// OAuth callbacks to the app.
       protocols: [
         {
-          name: "T3 Code",
+          name: "D3 Code",
           schemes: ["t3code", "t3code-dev"],
         },
       ],
@@ -3712,7 +3712,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     private: true,
     packageManager: rootPackageJson.packageManager,
     description:
-      "T3 Code is an open-source desktop app for coding agents. Work with your existing agent subscriptions, review code changes, and run commands in your projects. Connect from desktop, web, or mobile to continue working remotely.",
+      "D3 Code is an open-source desktop app for coding agents. Work with your existing agent subscriptions, review code changes, and run commands in your projects. Connect from desktop, web, or mobile to continue working remotely.",
     license: "MIT",
     // Required by the .deb control file.
     homepage: "https://t3.codes",
@@ -4001,7 +4001,7 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
     Flag.optional,
   ),
 }).pipe(
-  Command.withDescription("Build a desktop artifact for T3 Code."),
+  Command.withDescription("Build a desktop artifact for D3 Code."),
   Command.withHandler((input) => Effect.flatMap(resolveBuildOptions(input), buildDesktopArtifact)),
 );
 

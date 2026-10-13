@@ -240,7 +240,7 @@ const publishCmd = Command.make(
 // ---------------------------------------------------------------------------
 
 const cli = Command.make("cli").pipe(
-  Command.withDescription("T3 server build & publish CLI."),
+  Command.withDescription("D3 server build & publish CLI."),
   Command.withSubcommands([buildCmd, buildExeCmd, publishCmd]),
 );
 

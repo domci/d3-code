@@ -48,7 +48,7 @@ function versionCore(version: string): string {
 }
 
 /**
- * The skew a user can act on: the connected server runs an older T3 Code than
+ * The skew a user can act on: the connected server runs an older D3 Code than
  * this client, so the server is the side that needs updating.
  *
  * Two nightly builds compare their full versions, including the date and run.

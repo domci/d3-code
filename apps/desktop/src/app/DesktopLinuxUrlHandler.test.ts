@@ -28,7 +28,7 @@ const makeEnvironment = (path: Path.Path, overrides: Record<string, unknown> = {
     platform: "linux",
     isPackaged: true,
     isDevelopment: false,
-    displayName: "T3 Code (Alpha)",
+    displayName: "D3 Code (Alpha)",
     linuxDesktopEntryName: "com.t3tools.T3Code.desktop",
     linuxWmClass: "t3code",
     linuxApplicationsDir: "/home/alice/.local/share/applications",
@@ -260,7 +260,7 @@ describe("DesktopLinuxUrlHandler", () => {
     return Effect.gen(function* () {
       yield* runRegister(recorded, {
         existingEntry: DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
-          displayName: "T3 Code (Alpha)",
+          displayName: "D3 Code (Alpha)",
           execTarget: "/home/alice/Applications/D3-Code.AppImage",
           scheme: "t3code",
           iconPath: "/home/alice/.local/share/icons/com.t3tools.T3Code.desktop.png",
@@ -289,7 +289,7 @@ describe("DesktopLinuxUrlHandler", () => {
       yield* runRegister(recorded, {
         iconSource: "/tmp/.mount_T3/resources/icon.png",
         existingEntry: DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
-          displayName: "T3 Code (Alpha)",
+          displayName: "D3 Code (Alpha)",
           execTarget: "/home/alice/Applications/D3-Code.AppImage",
           scheme: "t3code",
           iconPath,

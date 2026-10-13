@@ -1,6 +1,6 @@
 # Release Checklist
 
-> For maintainers. Using T3 Code? See [docs/user](../user/).
+> For maintainers. Using D3 Code? See [docs/user](../user/).
 
 This document covers the unified release workflow for stable and nightly desktop releases.
 
@@ -24,7 +24,7 @@ This document covers the unified release workflow for stable and nightly desktop
   - Pushing a `vX.Y.Z` tag by hand still works and builds exactly the tagged commit. Use it when
     the commit to ship is not the latest nightly, such as a cherry-picked fix on a release branch.
 - Runs lint, typecheck, and tests alongside artifact builds. Publishing waits for every check.
-- Reads the shared production T3 Connect relay URL and Clerk client configuration before packaging clients.
+- Reads the shared production D3 Connect relay URL and Clerk client configuration before packaging clients.
 - Builds the platform-independent JS (server bundle, web client, Electron main) once in the `build_bundle` job and hands it to every platform job as the `js-bundle` artifact; the platform jobs only package it, so no runner rebuilds it.
 - Builds six desktop artifacts in parallel for both channels, each as its own job (`desktop_<platform>_<arch>`, one call of `release-desktop.yml`) on hardware of its own architecture, gated only on the bundle. The Windows jobs embed the same-arch Linux CLI archive as the WSL runtime and wait for that artifact partway through, not for the whole Linux job:
   - macOS `arm64` DMG
@@ -38,7 +38,7 @@ This document covers the unified release workflow for stable and nightly desktop
   - Automatically generated release notes are pinned to the previous tag in the same channel, so stable compares to the previous stable tag and nightly compares to the previous nightly tag.
 - Includes Electron auto-update metadata (for example `latest*.yml`, `nightly*.yml`, and `*.blockmap`) in release assets.
 - Builds a self-contained CLI archive per platform (`t3-<version>-<platform>-<arch>.tar.gz`, `.zip` on Windows) in the same job as that target's desktop artifact and attaches them to the GitHub Release with a `SHA256SUMS` file, on every channel, for five targets: macOS arm64, Linux x64 and arm64, Windows x64 and arm64. Every archive is built, signed, and smoke-tested on hardware of its own architecture. There is no macOS x64 archive: Node single-executables are unsupported on x64 macOS (the SEA docs list macOS as arm64 only) and the binary segfaults on start; the x64 desktop app is Electron and unaffected.
-  - The archive holds the server as a Node single-executable (`scripts/build-cli-archive.ts`), so unpacking it needs neither Node, npm, nor a compiler. It is the only form in which T3 Code manages a runtime: the desktop's SSH environments, the boot service, `t3 update`, and the install scripts all download and verify this archive against `SHA256SUMS`. The npm packages exist for people who run `npx t3` or `npm install -g t3` themselves and carry the same archive contents; nothing in the product installs from npm. The `curl | sh` installers are `scripts/install.sh` and `scripts/install.ps1`; the marketing site copies them into its `public/` at build time (`apps/marketing/scripts/stage-install-scripts.mjs`) and serves them at `t3.codes/install.sh` and `/install.ps1`.
+  - The archive holds the server as a Node single-executable (`scripts/build-cli-archive.ts`), so unpacking it needs neither Node, npm, nor a compiler. It is the only form in which D3 Code manages a runtime: the desktop's SSH environments, the boot service, `t3 update`, and the install scripts all download and verify this archive against `SHA256SUMS`. The npm packages exist for people who run `npx t3` or `npm install -g t3` themselves and carry the same archive contents; nothing in the product installs from npm. The `curl | sh` installers are `scripts/install.sh` and `scripts/install.ps1`; the marketing site copies them into its `public/` at build time (`apps/marketing/scripts/stage-install-scripts.mjs`) and serves them at `t3.codes/install.sh` and `/install.ps1`.
   - The executable is built with a Node that supports `--build-sea` (`VP_NODE_VERSION=26.8.2`, kept in step with `SEA_NODE_VERSION` in `apps/server/vite.config.ts`), while the repo stays on `engines.node`.
   - macOS archives are signed with the Developer ID certificate and notarized when the Apple secrets are present (ad hoc otherwise, which still runs from `curl`/`tar` installs). Windows executables use the same Azure Trusted Signing setup as the installer. Every native addon in the macOS archive is signed too, since the hardened runtime refuses unsigned libraries.
   - Each archive is extracted and executed on its build runner (`scripts/smoke-cli-archive.ts`) before it is uploaded.
@@ -54,7 +54,7 @@ This document covers the unified release workflow for stable and nightly desktop
 
 ## Pull request macOS previews
 
-Labeling a PR `preview:mac` publishes a signed, notarized Apple Silicon DMG with T3 Connect enabled
+Labeling a PR `preview:mac` publishes a signed, notarized Apple Silicon DMG with D3 Connect enabled
 to the rolling `desktop-preview` prerelease, and works for fork PRs. The label is a one-shot request
 for the commit it is applied to: the trusted workflow removes it once the build is in hand, and later
 pushes do not build until a maintainer applies it again. Every signed preview is therefore a
@@ -69,7 +69,7 @@ split so the Developer ID certificate never shares a job with PR code:
   bot, a collaborator, or listed in `.github/VOUCHED.td` (read from the default branch, so a PR cannot vouch
   for itself). It then packages and signs the bundle through `release-desktop.yml` checked out at
   `main`, so packaging, native helpers, and the Electron/desktop dependencies come from `main`, not
-  the PR. Only the version and the public T3 Connect identifiers in `.env.example` are read from the
+  the PR. Only the version and the public D3 Connect identifiers in `.env.example` are read from the
   PR commit, as data, so the signed app's passkey entitlement matches the bundle. A PR that changes
   packaging must use the `channel=preview` release train above instead.
 
@@ -93,7 +93,7 @@ The finalize job uses them to commit and push aligned package versions to `main`
 GitHub Release publication uses the repository-scoped workflow token so it has a rate-limit quota
 independent from the shared Release App installation.
 
-## T3 Connect relay deployment
+## D3 Connect relay deployment
 
 The relay is a shared control plane versioned separately from client releases. Stable and nightly
 client builds must point at the same relay so users see the same linked environments when switching
@@ -142,7 +142,7 @@ Required `production` environment secrets:
 - `CLERK_SECRET_KEY`
 - `APNS_PRIVATE_KEY`
 
-After changing a variable or secret, run the **Deploy T3 Connect relay** workflow manually from
+After changing a variable or secret, run the **Deploy D3 Connect relay** workflow manually from
 `main` with **force** unchecked. Alchemy compares the values the Worker reads and redeploys it when
 one changed. Check **force** only to redeploy resources with no detected change: a forced run also
 replaces the Postgres runtime role and its password
@@ -199,7 +199,7 @@ A deleted legacy tunnel keeps its allocation, so its hostname is kept. When the 
 - On a build with recovery, the connector is rejected and the host requests a replacement tunnel at
   the same hostname.
 - On an older build with a CLI link, startup provisions a new tunnel.
-- On an older build linked from web or mobile, the host stays offline until T3 Code on that computer
+- On an older build linked from web or mobile, the host stays offline until D3 Code on that computer
   is updated.
 
 Ship the web and mobile builds that show the offline reason before enabling legacy cleanup, so a
@@ -216,7 +216,7 @@ column in its first deploy with this change; the legacy switch stays `off` until
    They include ones the reaper skips, so they are an upper bound on the backlog. The share of `wouldDeleteLegacy` in each sweep's `scanned` estimates how
    much of that total is eligible.
 3. Run the legacy steps of the disposable-host canary below.
-4. Before enabling, confirm the web and mobile builds that show the "update T3 Code on that computer"
+4. Before enabling, confirm the web and mobile builds that show the "update D3 Code on that computer"
    message are live. Without them, a user whose older host lost its tunnel only sees it as offline.
 5. Set the legacy mode to `enabled`. One sweep deletes at most 100 tunnels, four at a time, and
    stops starting new deletions after 90 seconds. A backlog of 20,000 takes about 17 hours if each
@@ -231,7 +231,7 @@ chart the `attributes.custom.relay.managed_endpoint_reaper.*` fields over time.
 Set the legacy mode back to `off` and deploy if any of these happen:
 
 - `failed` stays above a few per sweep. Read the warning log for the Cloudflare error.
-- Users report an environment that is offline with the update message after they have updated T3
+- Users report an environment that is offline with the update message after they have updated D3
   Code on that computer and restarted it.
 - Relay request errors rise while sweeps run. Deletions share the Postgres connection pool with
   request handlers.
@@ -243,12 +243,12 @@ recover as described above.
 ### Disposable-host canary
 
 This test has not been run against a real Cloudflare account. Run it against a disposable relay
-stage, test Cloudflare account, disposable host, and disposable T3 home. Keep production cleanup at
-`off` or `dry-run` until it passes. Do not stop a daily-use T3 server.
+stage, test Cloudflare account, disposable host, and disposable D3 home. Keep production cleanup at
+`off` or `dry-run` until it passes. Do not stop a daily-use D3 server.
 
 1. Deploy the disposable stage with cleanup `dry-run`. Link a first disposable environment through
    web or mobile settings and confirm its tunnel is healthy and recovery is registered.
-2. Stop that host and restart the same T3 home on a different local port. Confirm the public
+2. Stop that host and restart the same D3 home on a different local port. Confirm the public
    hostname reaches the new port and sends nothing to the old one.
 3. Link a second disposable environment with a server build that predates recovery registration.
    Capture its managed `cloudflared` child PID, confirm it belongs to that host, and pause only that
@@ -543,7 +543,7 @@ Checklist:
    - `APPLE_API_KEY`: contents of the downloaded `.p8`
    - `APPLE_API_KEY_ID`: Key ID
    - `APPLE_API_ISSUER`: Issuer ID
-10. Complete the Clerk Native API and AASA setup in [T3 Connect setup](./connect-setup.md#desktop-passkeys).
+10. Complete the Clerk Native API and AASA setup in [D3 Connect setup](./connect-setup.md#desktop-passkeys).
 11. Re-run a tag release and confirm macOS artifacts are signed/notarized and contain the expected
     `com.apple.developer.associated-domains` entitlement.
 

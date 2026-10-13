@@ -1,32 +1,17 @@
 ---
-import type { ComponentProps } from "astro/types";
-import { Image } from "astro:assets";
-import iconStable from "../assets/icon.webp";
-import iconNightly from "../assets/icon-nightly.webp";
 import Layout from "../layouts/Layout.astro";
 import { RELEASES_URL } from "../lib/releases";
-import { ANDROID_PLAY_STORE_URL, IOS_APP_STORE_URL } from "../lib/site";
+import { ANDROID_PLAY_STORE_URL, IOS_APP_STORE_URL, GITHUB_REPOSITORY_URL } from "../lib/site";
 
-const imageProps = {
-  alt: "",
-  densities: [1, 2, 3],
-  format: "webp",
-  quality: 90,
-  decoding: "async",
-} satisfies Partial<ComponentProps<typeof Image>>;
 ---
 
-<Layout title="Download — T3 Code" description="Download T3 Code for macOS, Windows, or Linux.">
+<Layout title="Download — D3 Code" description="Download upstream T3 Code for macOS, Windows, or Linux.">
   <div class="download-page" id="download-page" data-channel="stable">
     <!-- The sky lives behind the header and fades to the page. It only shows on the nightly channel. -->
     <header class="download-head">
       <div class="sky" aria-hidden="true"></div>
       <div class="head-inner" data-rise>
-        <span class="head-icon">
-          <Image class="head-icon--stable" src={iconStable} width={64} height={64} loading="eager" {...imageProps} />
-          <Image class="head-icon--nightly" src={iconNightly} width={64} height={64} loading="eager" {...imageProps} />
-        </span>
-        <h1 class="heading">Download T3 Code</h1>
+        <h1 class="heading">Download upstream T3 Code</h1>
       </div>
       <div class="channel-toggle" role="tablist" aria-label="Release channel" data-rise style="--d:90ms">
         <span class="channel-thumb" aria-hidden="true"></span>
@@ -40,6 +25,8 @@ const imageProps = {
       </p>
     </header>
 
+    <p class="head-meta">Build <a href={GITHUB_REPOSITORY_URL}>D3 Code from source</a>. These downloads and app store links distribute upstream T3 Code.</p>
+
     <div class="platforms">
       <!-- macOS -->
       <section class="platform-section" data-rise style="--d:240ms">
@@ -49,10 +36,6 @@ const imageProps = {
         </div>
         <div class="download-cards">
           <a class="download-card" data-asset="arm64.dmg" href={RELEASES_URL}>
-            <span class="card-icon">
-              <Image class="card-icon--stable" src={iconStable} width={28} height={28} loading="lazy" {...imageProps} />
-              <Image class="card-icon--nightly" src={iconNightly} width={28} height={28} loading="lazy" {...imageProps} />
-            </span>
             <span class="card-text">
               <span class="card-arch">Apple Silicon (arm64)</span>
               <span class="card-format">.dmg</span>
@@ -72,10 +55,6 @@ const imageProps = {
         </div>
         <div class="download-cards">
           <a class="download-card" data-asset="x64.exe" href={RELEASES_URL}>
-            <span class="card-icon">
-              <Image class="card-icon--stable" src={iconStable} width={28} height={28} loading="lazy" {...imageProps} />
-              <Image class="card-icon--nightly" src={iconNightly} width={28} height={28} loading="lazy" {...imageProps} />
-            </span>
             <span class="card-text">
               <span class="card-arch">Windows 10, 11</span>
               <span class="card-format">.exe</span>
@@ -92,20 +71,12 @@ const imageProps = {
         </div>
         <div class="download-cards">
           <a class="download-card" data-asset="amd64.deb" href={RELEASES_URL}>
-            <span class="card-icon">
-              <Image class="card-icon--stable" src={iconStable} width={28} height={28} loading="lazy" {...imageProps} />
-              <Image class="card-icon--nightly" src={iconNightly} width={28} height={28} loading="lazy" {...imageProps} />
-            </span>
             <span class="card-text">
               <span class="card-arch">Debian, Ubuntu</span>
               <span class="card-format">.deb</span>
             </span>
           </a>
           <a class="download-card" data-asset="x86_64.AppImage" href={RELEASES_URL}>
-            <span class="card-icon">
-              <Image class="card-icon--stable" src={iconStable} width={28} height={28} loading="lazy" {...imageProps} />
-              <Image class="card-icon--nightly" src={iconNightly} width={28} height={28} loading="lazy" {...imageProps} />
-            </span>
             <span class="card-text">
               <span class="card-arch">x86_64</span>
               <span class="card-format">AppImage</span>

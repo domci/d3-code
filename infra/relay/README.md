@@ -1,22 +1,25 @@
-# T3 Connect Relay
+# D3 Connect Relay
+
+The fork displays D3 Connect for this feature. The example client configuration
+uses the upstream T3 Connect service and its existing accounts and addresses.
 
 > [!NOTE]
-> Sign in to T3 Connect from the app under Settings > Connections.
+> Sign in to D3 Connect from the app under Settings > Connections.
 
-The relay is the hosted control plane for T3 Connect. It helps clients discover and connect to
+The relay is the hosted control plane for D3 Connect. It helps clients discover and connect to
 remote environments, manages the cloud-side records needed for those connections, and delivers
 optional mobile notifications and Live Activities.
 
-The relay is intentionally not in the hot path for normal T3 Code traffic. After a client connects,
+The relay is intentionally not in the hot path for normal D3 Code traffic. After a client connects,
 regular API and WebSocket traffic goes directly between that client and the selected environment.
-See the [T3 Connect architecture note](../../docs/internals/t3-connect.md) for the larger system
+See the [D3 Connect architecture note](../../docs/internals/t3-connect.md) for the larger system
 design.
 
 ## Responsibilities
 
 The relay currently owns:
 
-- Linking T3 Code environments to a cloud account.
+- Linking D3 Code environments to a cloud account.
 - Provisioning and tracking managed environment endpoints.
 - Issuing short-lived credentials used to connect clients to linked environments.
 - Listing linked environments and registered mobile devices for an account.
@@ -163,6 +166,6 @@ and hosted web builds.
 
 See:
 
-- [T3 Connect setup](../../docs/operations/connect-setup.md) for Clerk keys, JWT templates, and sign-up restrictions.
+- [D3 Connect setup](../../docs/operations/connect-setup.md) for Clerk keys, JWT templates, and sign-up restrictions.
 - [Relay Observability](../../docs/operations/relay-observability.md) for deployment tracing and diagnostics.
-- [T3 Connect architecture](../../docs/internals/t3-connect.md) for environment linking and trust boundaries.
+- [D3 Connect architecture](../../docs/internals/t3-connect.md) for environment linking and trust boundaries.

@@ -18,7 +18,7 @@ const personalTeamBundleIdentifier = repoEnv.T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID?
 const IOS_BUNDLE_IDENTIFIER_PATTERN = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
 
 const fromRepoRoot = (relativePath: string) => `../../${relativePath}`;
-// Android layers are rendered by scripts/export-android-icons.ts from the Icon Composer sources.
+// Android layers are rendered by scripts/export-android-icons.ts from the D3 source artwork.
 // The wordmark sits inside the adaptive safe zone; the variant artwork is a full-bleed background.
 const androidAdaptiveForeground = "./assets/android-icon-foreground.png";
 
@@ -34,7 +34,7 @@ if (
 
 const DEVELOPMENT_ASSETS = {
   appIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIosIconPng),
-  iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIconComposerProject),
+  iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIosIconPng),
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIosIconPng),
   androidAdaptiveForeground,
   androidAdaptiveBackgroundColor: "#347FF8",
@@ -47,7 +47,7 @@ const DEVELOPMENT_ASSETS = {
 
 const RELEASE_ASSETS = {
   appIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIosIconPng),
-  iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIconComposerProject),
+  iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIosIconPng),
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIosIconPng),
   androidAdaptiveForeground,
   androidAdaptiveBackgroundColor: "#2E2F33",

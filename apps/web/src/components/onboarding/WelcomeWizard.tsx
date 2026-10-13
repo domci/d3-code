@@ -79,7 +79,7 @@ import { buildProviderInstanceUpdatePatch } from "../settings/SettingsPanels.log
 import { TerminalViewport } from "../ThreadTerminalDrawer";
 import { CloudEnvironmentConnectRows } from "../cloud/CloudEnvironmentConnectList";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
-import { T3Wordmark } from "../T3Wordmark";
+import { D3Wordmark } from "../D3Wordmark";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
 import { CommandBlock } from "../CommandBlock";
@@ -228,7 +228,7 @@ export function WelcomeWizard({
           title="Set up D3 Code"
           identity={
             <div className="flex items-baseline gap-1.5" role="img" aria-label="D3 Code">
-              <T3Wordmark className="h-4 w-auto shrink-0" aria-hidden />
+              <D3Wordmark className="h-4 w-auto shrink-0" aria-hidden />
               <span className="text-2xl font-medium tracking-tight text-muted-foreground">
                 Code
               </span>
@@ -485,7 +485,7 @@ function ConnectAccountOption({
           }
         >
           <CloudIcon className="size-4 text-muted-foreground" />
-          <span className="flex-1 text-left">T3 Connect</span>
+          <span className="flex-1 text-left">D3 Connect</span>
           <span className="text-xs text-muted-foreground">
             {!isLoaded
               ? "Loading sign-in…"

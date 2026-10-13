@@ -1,8 +1,8 @@
 # Observability
 
-> For maintainers. Using T3 Code? See [docs/user](../user/).
+> For maintainers. Using D3 Code? See [docs/user](../user/).
 
-T3 Code has one server-side observability model:
+D3 Code has one server-side observability model:
 
 - pretty logs go to stdout for humans
 - completed spans go to a local NDJSON trace file
@@ -216,7 +216,7 @@ macOS app bundle example:
 T3CODE_OTLP_TRACES_URL=http://localhost:4318/v1/traces \
 T3CODE_OTLP_METRICS_URL=http://localhost:4318/v1/metrics \
 T3CODE_OTLP_LOGS_URL=http://localhost:4318/v1/logs \
-"/Applications/T3 Code.app/Contents/MacOS/T3 Code"
+"/Applications/D3 Code.app/Contents/MacOS/D3 Code"
 ```
 
 Direct binary example:
@@ -402,7 +402,7 @@ Webhooks have their own families:
 
 `ScheduledTaskService.triggerWebhook` spans carry the same outcome per request, and each run
 started from a delivery is its own `ScheduledTaskService.runWebhookDelivery` trace. For a request
-the relay forwarded, the span also goes to the T3 Connect trace export as a child of the relay's
+the relay forwarded, the span also goes to the D3 Connect trace export as a child of the relay's
 span; requests that reach the environment directly never join a sender's trace.
 
 Use metrics when the question is:
@@ -668,7 +668,7 @@ pid="$(jq .pid "${T3CODE_HOME:-$HOME/.t3}/userdata/server-runtime.json")"
 ps -p "$pid" -o command=
 ```
 
-If `ps` shows the T3 Code server, send the signal:
+If `ps` shows the D3 Code server, send the signal:
 
 ```bash
 kill -USR2 "$pid"

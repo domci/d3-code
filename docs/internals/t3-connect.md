@@ -1,6 +1,9 @@
-# T3 Connect
+# D3 Connect
 
-T3 Connect uses Clerk for cloud identity. The relay manages environment links,
+The fork displays this as D3 Connect; the configured upstream T3 Connect service,
+OAuth identity, and relay addresses remain unchanged.
+
+D3 Connect uses Clerk for cloud identity. The relay manages environment links,
 credentials for reaching environments, and managed tunnel allocations. After
 bootstrap, clients send application traffic through the environment's tunnel
 hostname; the relay Worker does not proxy their HTTP or WebSocket sessions.

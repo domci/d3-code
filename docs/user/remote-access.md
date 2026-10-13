@@ -1,13 +1,16 @@
 # Remote access
 
-Connect a phone, browser, or another desktop app to T3 Code running on a different
+Connect a phone, browser, or another desktop app to D3 Code running on a different
 machine. That machine must stay running and reachable while you work.
 
-## T3 Connect
+## D3 Connect
 
-T3 Connect makes an environment available to your other devices without setting
+D3 Connect is the fork's display name for the upstream T3 Connect service. Its
+account, service addresses, and operator remain unchanged.
+
+D3 Connect makes an environment available to your other devices without setting
 up router forwarding. In the desktop app on the host, open **Settings →
-Connections**, sign in, and enable **T3 Connect** for that environment.
+Connections**, sign in, and enable **D3 Connect** for that environment.
 
 For a command-line host, run:
 
@@ -20,12 +23,12 @@ Follow the sign-in instructions. Setup offers a
 server with `t3 serve`. Saving your sign-in alone does not make the machine
 reachable.
 
-On your other device, sign in to the same T3 Connect account and choose the
+On your other device, sign in to the same D3 Connect account and choose the
 environment. Over SSH, the CLI prints a browser link and a short code. Open the
 link on any device, confirm the code matches, and approve. The CLI continues on
 its own, so you do not need to forward an OAuth callback port.
 
-T3 Connect renews access credentials when needed without disconnecting a healthy
+D3 Connect renews access credentials when needed without disconnecting a healthy
 connection. Pull request diffs and provider settings keep working after the
 previous credential expires. A failed renewal affects that request; it does not
 disconnect an otherwise healthy conversation.
@@ -65,30 +68,30 @@ another link to share.
 ### Reach one machine several ways
 
 A machine can have more than one route: LAN, Tailscale, a public URL, SSH, or
-T3 Connect. To add one, choose **Add route** in the machine's route list, or
-next to it in the T3 Connect list. Pairing the same machine again over another
+D3 Connect. To add one, choose **Add route** in the machine's route list, or
+next to it in the D3 Connect list. Pairing the same machine again over another
 address also adds a route instead of a second machine. A new route is placed by
 speed, in that order, and you can reorder routes at any time.
 
-While connected through T3 Connect or a paired address, T3 Code also learns the
+While connected through D3 Connect or a paired address, D3 Code also learns the
 machine's current LAN and Tailscale addresses and adds them as routes, so
-pairing once through T3 Connect is enough to use the LAN at home. When the
+pairing once through D3 Connect is enough to use the LAN at home. When the
 machine's LAN address changes, for example after it joins another Wi-Fi network,
 the learned route follows it. The machine must allow network access for its LAN
 address to be learned. You can reorder a learned route, but not remove it; it
 goes away with the route it was learned through, or when the machine stops
 reporting that address.
 
-T3 Code connects over the first route that answers. Away from home, a LAN
+D3 Code connects over the first route that answers. Away from home, a LAN
 address that does not answer is checked briefly and skipped. It is only tried
 again, after the other routes, if none of them connect. While connected over a
-later route, T3 Code checks the earlier ones when your network changes, when you
+later route, D3 Code checks the earlier ones when your network changes, when you
 return to the app, and every minute, and moves back as soon as one works.
 
 On web and desktop, select the route count under the machine's name in
 **Settings → Connections** to see its routes. Drag a route to change the order,
 or remove it. On mobile, open the machine under **Settings → Environments** and
-choose **Edit**. Signing out of T3 Connect removes only that route; a machine
+choose **Edit**. Signing out of D3 Connect removes only that route; a machine
 you can still reach another way stays saved.
 
 ### Balance new threads across machines
@@ -150,13 +153,13 @@ scheme uses HTTP, so include `https://` when your server uses HTTPS.
 ## Desktop-managed SSH
 
 In the desktop app, open **Settings → Connections → Add environment**, choose
-**SSH**, and enter a host or SSH alias such as `user@example.com`. T3 Code starts
+**SSH**, and enter a host or SSH alias such as `user@example.com`. D3 Code starts
 or reuses a server there and opens the port forward for you. Projects, provider
 credentials, and agent work stay on the remote machine.
 
 The remote host must be Linux or an Apple Silicon Mac with `curl` or `wget`,
 `tar`, `sha256sum` or `shasum`, and [provider setup](./install.md#providers).
-The first launch downloads T3 Code's server to `~/.t3/runtime` on the host, so
+The first launch downloads D3 Code's server to `~/.t3/runtime` on the host, so
 it takes longer than later ones.
 Provider CLIs must be on the `PATH` of a non-interactive login shell there;
 check with:
@@ -166,7 +169,7 @@ ssh user@example.com 'sh -lc "command -v claude codex"'
 ```
 
 If SSH reconnecting fails after an app update, retry the launch once. Removing
-the connection stops a server that T3 Code launched; a server that was already
+the connection stops a server that D3 Code launched; a server that was already
 running is left alone.
 
 For Antigravity's Google callback on a remote host, see
@@ -180,7 +183,7 @@ directly. Every other device, and the desktop app for other environments,
 streams them from the host. Agents keep using them while no device is
 connected, and `localhost` addresses reach servers on the host.
 
-The first tab downloads a headless Chrome, about 120 MB, into the T3 home. It
+The first tab downloads a headless Chrome, about 120 MB, into the D3 home. It
 is the same browser [HTML renders](html-renders.md) use, so a host downloads it
 only once. Some Linux hosts need [setup](#browser-host-setup) before it can
 start.
@@ -222,7 +225,7 @@ set `T3CODE_SERVER_BROWSER_SANDBOX=0` for the environment to run without it.
 
 ## Connect an outside agent
 
-Claude Code, Codex, ChatGPT and other agents T3 Code did not start can drive
+Claude Code, Codex, ChatGPT and other agents D3 Code did not start can drive
 threads on an environment through its MCP server. See
 [outside agents](./outside-agents.md) for setup.
 
@@ -276,21 +279,21 @@ a client's permissions.
 local changes. Add `filesystem:write` to allow editing files or saving plans to
 the workspace. These scopes control direct file access from the client.
 
-To remove an environment from T3 Connect, open your account menu's **T3 Connect**
-page, or **Settings → T3 Connect** on mobile, and choose **Deregister**. This
+To remove an environment from D3 Connect, open your account menu's **D3 Connect**
+page, or **Settings → D3 Connect** on mobile, and choose **Deregister**. This
 revokes its cloud access and frees its host space even when the environment is
 offline or has been wiped. Removing an environment from a device's connection
 settings only forgets it on that device; it stays registered to your account.
 
-When idle tunnel cleanup is enabled, T3 Connect removes a linked environment's
+When idle tunnel cleanup is enabled, D3 Connect removes a linked environment's
 tunnel after it stays offline for several minutes. The environment stays linked
-and keeps the same address. When the host starts again or wakes, T3 Connect
+and keeps the same address. When the host starts again or wakes, D3 Connect
 creates a replacement tunnel on its own. You do not need to pair again. Cleanup
 usually runs five to ten minutes after the tunnel goes down.
 
-T3 Connect also removes the tunnel of an environment running an older version of
-T3 Code once it has been offline for seven days. That environment shows a message
-asking you to update. Start T3 Code on that computer and update it to the latest
+D3 Connect also removes the tunnel of an environment running an older version of
+D3 Code once it has been offline for seven days. That environment shows a message
+asking you to update. Start D3 Code on that computer and update it to the latest
 version; it reconnects at the same address without pairing again.
 
 On a command-line host, `t3 connect unlink` disables exposure while retaining
@@ -300,7 +303,7 @@ your login; `t3 connect logout` also clears that login. Background-service
 Treat pairing URLs and authorization codes as passwords. Do not include them in
 screenshots, logs, or bug reports.
 
-## T3 Connect troubleshooting
+## D3 Connect troubleshooting
 
 Run `t3 connect status` on the host to inspect saved authorization and link
 configuration. It is not a live reachability check. If the environment appears
@@ -309,9 +312,9 @@ when SSH closes, see [background-service troubleshooting](./background-service.m
 
 | Error                                                     | Recovery                                                                                                                                    |
 | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `environment_link_limit_exceeded` or managed tunnel limit | Deregister an unused environment, then restart T3 Code on the host.                                                                         |
+| `environment_link_limit_exceeded` or managed tunnel limit | Deregister an unused environment, then restart D3 Code on the host.                                                                         |
 | `auth_invalid` or `invalid_bearer`                        | Run `t3 connect login`. If credentials were revoked, run `t3 connect logout`, then `t3 connect` again. Restart the server after signing in. |
-| Expired or invalid link proof                             | Check the host's date and time, update T3 Code, then restart it.                                                                            |
+| Expired or invalid link proof                             | Check the host's date and time, update D3 Code, then restart it.                                                                            |
 | HTTP 403 without a recognized error                       | Check relay access, proxies, and firewall rules. Keep any Cloudflare Ray ID for a bug report.                                               |
 | HTTP 408, 429, or 5xx                                     | Check network and relay availability. Startup retries temporary failures for up to ten minutes.                                             |
 
@@ -321,15 +324,15 @@ foreground server, stop it and run `t3 serve` again with your usual options.
 Include the diagnostic message and trace ID when reporting a persistent failure.
 
 For a connection that still fails after linking, check the date and time on both
-devices. For server version warnings, follow [Updating T3 Code](./updating.md).
+devices. For server version warnings, follow [Updating D3 Code](./updating.md).
 
 ## Using the Desktop App as a Remote Only
 
 If a computer should only drive work running elsewhere, turn off its local environment. In the
 desktop app, open **Settings → Connections** and switch off **Local
-environment**. T3 Code restarts without a local server: no local agents or terminals run, WSL
+environment**. D3 Code restarts without a local server: no local agents or terminals run, WSL
 backends stay off, and other devices can no longer connect to this computer. Your projects,
-history, and saved connections are kept, and you keep working through pairing, T3 Connect, or SSH.
+history, and saved connections are kept, and you keep working through pairing, D3 Connect, or SSH.
 
 Switch **Local environment** back on in the same place to restart with your previous local
 settings.

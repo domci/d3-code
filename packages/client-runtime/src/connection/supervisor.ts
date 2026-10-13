@@ -254,7 +254,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
   | ConnectionWakeups.ConnectionWakeups
 > {
   const target = entry.target;
-  // Relay-specific handling applies when any route is T3 Connect, since the
+  // Relay-specific handling applies when any route is D3 Connect, since the
   // attempt or the live session may be using it.
   const usesRelay = connectionRoutes(entry).some(
     (route) => route.target._tag === "RelayConnectionTarget",
@@ -342,7 +342,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
 
   /**
    * Preflights the routes ranked above the one in use and signals the best
-   * that would connect. Routes without a cheap check (T3 Connect, SSH) never
+   * that would connect. Routes without a cheap check (D3 Connect, SSH) never
    * pass, so they are fallbacks, not destinations.
    */
   const checkBetterRoutes = Effect.fnUntraced(function* (
@@ -552,7 +552,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
       // out, so a long background resume replaces the session at once.
       return "reset" as const;
     }
-    // Only a session over T3 Connect holds the old account's credential.
+    // Only a session over D3 Connect holds the old account's credential.
     if (next.reason === "credentials-changed" && isRelayLease(lease)) {
       yield* logManagedRelayAccountChange;
       return "end" as const;
