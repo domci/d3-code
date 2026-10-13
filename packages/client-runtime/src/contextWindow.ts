@@ -1,6 +1,5 @@
 import type {
-  OrchestrationV2ProviderTurnTokenUsage,
-  OrchestrationV2ProviderThread,
+  OrchestrationV2ThreadProjection,
   OrchestrationV2TurnItem,
   ThreadTokenUsageSnapshot,
 } from "@t3tools/contracts";
@@ -28,12 +27,67 @@ export function deriveLatestContextWindowSnapshot(
   entries: ReadonlyArray<{
     readonly item: OrchestrationV2TurnItem;
   }>,
-  liveUsage?: OrchestrationV2ProviderTurnTokenUsage | null,
-  providerThread?: Pick<OrchestrationV2ProviderThread, "contextUsage" | "updatedAt"> | null,
+  projection: Pick<
+    OrchestrationV2ThreadProjection,
+    "thread" | "providerThreads" | "providerTurns" | "attempts"
+  > | null,
 ): ContextWindowSnapshot | null {
-  if (liveUsage != null) {
+  if (projection === null) return null;
+  const providerThread = projection.providerThreads.find(
+    (candidate) =>
+      candidate.id === projection.thread.activeProviderThreadId &&
+      candidate.providerInstanceId === projection.thread.providerInstanceId,
+  );
+  if (providerThread === undefined) return null;
+  const attempts = new Map(projection.attempts.map((attempt) => [attempt.id, attempt]));
+  const turns = new Map(projection.providerTurns.map((turn) => [turn.id, turn]));
+  const nativeThreadId = providerThread.nativeThreadRef?.nativeId;
+  // Recovery may reuse the row for a different native conversation; legacy identities are optional.
+  const belongsToNativeThread = (
+    turn: OrchestrationV2ThreadProjection["providerTurns"][number] | undefined,
+  ) => {
+    const attempt = turn?.runAttemptId == null ? undefined : attempts.get(turn.runAttemptId);
+    return (
+      nativeThreadId === undefined ||
+      attempt?.nativeThreadId === undefined ||
+      attempt.nativeThreadId === nativeThreadId
+    );
+  };
+  const liveUsage = projection.providerTurns.reduce<
+    OrchestrationV2ThreadProjection["providerTurns"][number] | null
+  >(
+    (latest, candidate) =>
+      candidate.providerThreadId === providerThread.id &&
+      belongsToNativeThread(candidate) &&
+      candidate.tokenUsage !== undefined &&
+      (latest === null || candidate.ordinal > latest.ordinal)
+        ? candidate
+        : latest,
+    null,
+  )?.tokenUsage;
+  const compaction = entries.findLast(
+    ({ item }) =>
+      item.type === "compaction" &&
+      item.status === "completed" &&
+      item.providerThreadId === providerThread.id &&
+      item.threadId === projection.thread.id &&
+      belongsToNativeThread(
+        item.providerTurnId === null ? undefined : turns.get(item.providerTurnId),
+      ) &&
+      typeof item.afterTokenCount === "number" &&
+      Number.isFinite(item.afterTokenCount) &&
+      item.afterTokenCount >= 0,
+  )?.item;
+  const usageUpdatedAt =
+    liveUsage === undefined
+      ? DateTime.toEpochMillis(providerThread.updatedAt)
+      : Date.parse(liveUsage.updatedAt);
+  const newerCompaction =
+    compaction !== undefined && DateTime.toEpochMillis(compaction.updatedAt) > usageUpdatedAt;
+  if (liveUsage != null && !newerCompaction) {
     const usedTokens = Math.max(0, liveUsage.usedTokens);
-    const maxTokens = liveUsage.maxTokens ?? null;
+    const maxTokens =
+      liveUsage.maxTokens != null && liveUsage.maxTokens > 0 ? liveUsage.maxTokens : null;
     const usedPercentage =
       maxTokens !== null && maxTokens > 0 ? Math.min(100, (usedTokens / maxTokens) * 100) : null;
     const remainingTokens =
@@ -57,7 +111,7 @@ export function deriveLatestContextWindowSnapshot(
       lastReasoningOutputTokens: null,
       toolUses: null,
       durationMs: null,
-      compactsAutomatically: true,
+      compactsAutomatically: providerThread.contextUsage?.compactsAutomatically ?? null,
       autoCompactThreshold: null,
       cost: null,
       updatedAt: liveUsage.updatedAt,
@@ -68,9 +122,11 @@ export function deriveLatestContextWindowSnapshot(
   if (
     providerUsage !== null &&
     providerUsage !== undefined &&
-    providerUsageUpdatedAt !== undefined
+    providerUsageUpdatedAt !== undefined &&
+    !newerCompaction
   ) {
-    const maxTokens = asFiniteNumber(providerUsage.maxTokens);
+    const reportedMax = asFiniteNumber(providerUsage.maxTokens);
+    const maxTokens = reportedMax !== null && reportedMax > 0 ? reportedMax : null;
     const usedTokens = providerUsage.usedTokens;
     const usedPercentage =
       maxTokens !== null && maxTokens > 0 ? Math.min(100, (usedTokens / maxTokens) * 100) : null;
@@ -98,31 +154,20 @@ export function deriveLatestContextWindowSnapshot(
       updatedAt: DateTime.formatIso(providerUsageUpdatedAt),
     };
   }
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const entry = entries[index];
-    if (!entry || entry.item.type !== "compaction") {
-      continue;
-    }
-    const payload = entry.item;
+  if (compaction?.type === "compaction") {
+    const payload = compaction;
     const usedTokens = asFiniteNumber(payload.afterTokenCount);
     if (usedTokens === null || usedTokens < 0) {
-      continue;
+      return null;
     }
-
-    const maxTokens = null;
-    const usedPercentage =
-      maxTokens !== null && maxTokens > 0 ? Math.min(100, (usedTokens / maxTokens) * 100) : null;
-    const remainingTokens =
-      maxTokens !== null ? Math.max(0, Math.round(maxTokens - usedTokens)) : null;
-    const remainingPercentage = usedPercentage !== null ? Math.max(0, 100 - usedPercentage) : null;
 
     return {
       usedTokens,
       totalProcessedTokens: asFiniteNumber(payload.beforeTokenCount),
-      maxTokens,
-      remainingTokens,
-      usedPercentage,
-      remainingPercentage,
+      maxTokens: null,
+      remainingTokens: null,
+      usedPercentage: null,
+      remainingPercentage: null,
       inputTokens: null,
       cachedInputTokens: null,
       outputTokens: null,
@@ -134,10 +179,10 @@ export function deriveLatestContextWindowSnapshot(
       lastReasoningOutputTokens: null,
       toolUses: null,
       durationMs: null,
-      compactsAutomatically: true,
+      compactsAutomatically: providerThread.contextUsage?.compactsAutomatically ?? null,
       autoCompactThreshold: null,
       cost: null,
-      updatedAt: DateTime.formatIso(payload.startedAt ?? payload.updatedAt),
+      updatedAt: DateTime.formatIso(payload.updatedAt),
     };
   }
 

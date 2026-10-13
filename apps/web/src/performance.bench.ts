@@ -1,4 +1,13 @@
-import { NodeId, PlanId, ProjectId, RunId } from "@t3tools/contracts";
+import {
+  MessageId,
+  NodeId,
+  PlanId,
+  ProjectId,
+  ProviderThreadId,
+  RunAttemptId,
+  RunId,
+  type OrchestrationV2ExecutionNode,
+} from "@t3tools/contracts";
 import {
   getLatestThreadForProject,
   sortActiveThreadsByOrderKey,
@@ -9,7 +18,7 @@ import { formatHourShort, formatRelativeHourShort } from "@t3tools/shared/usageF
 import { describe, test } from "vite-plus/test";
 
 import { makeThreadProjectionFixture } from "./test-fixtures";
-import { deriveActivePlanState } from "./session-logic";
+import { deriveCurrentTaskProgress } from "@t3tools/client-runtime/state/thread-plans";
 
 const projectId = ProjectId.make("benchmark-project");
 const runId = RunId.make("benchmark-run");
@@ -27,8 +36,72 @@ const threads = Array.from({ length: 1_000 }, (_, index) => {
   };
 });
 const baseProjection = makeThreadProjectionFixture();
+const providerThreadId = ProviderThreadId.make("bench-provider");
+const rootNodeId = NodeId.make("bench-root");
+const attemptId = RunAttemptId.make("bench-attempt");
+const root: OrchestrationV2ExecutionNode = {
+  id: rootNodeId,
+  threadId: baseProjection.thread.id,
+  runId,
+  parentNodeId: null,
+  rootNodeId,
+  kind: "root_turn",
+  status: "running",
+  countsForRun: true,
+  providerThreadId,
+  providerTurnId: null,
+  nativeItemRef: null,
+  runtimeRequestId: null,
+  checkpointScopeId: null,
+  startedAt: baseProjection.updatedAt,
+  completedAt: null,
+};
 const projection = {
   ...baseProjection,
+  thread: { ...baseProjection.thread, activeProviderThreadId: providerThreadId },
+  runs: [
+    {
+      id: runId,
+      threadId: baseProjection.thread.id,
+      ordinal: 1,
+      providerInstanceId: baseProjection.thread.providerInstanceId,
+      modelSelection: baseProjection.thread.modelSelection,
+      providerThreadId,
+      userMessageId: MessageId.make("bench-user"),
+      rootNodeId,
+      activeAttemptId: attemptId,
+      status: "running" as const,
+      requestedAt: baseProjection.updatedAt,
+      startedAt: baseProjection.updatedAt,
+      completedAt: null,
+      checkpointId: null,
+      contextHandoffId: null,
+    },
+  ],
+  attempts: [
+    {
+      id: attemptId,
+      runId,
+      attemptOrdinal: 1,
+      rootNodeId,
+      providerInstanceId: baseProjection.thread.providerInstanceId,
+      providerThreadId,
+      providerTurnId: null,
+      reason: "initial" as const,
+      status: "running" as const,
+      startedAt: baseProjection.updatedAt,
+      completedAt: null,
+    },
+  ],
+  nodes: [
+    root,
+    {
+      ...root,
+      id: NodeId.make("bench-node"),
+      kind: "todo_list" as const,
+      parentNodeId: rootNodeId,
+    },
+  ],
   plans: Array.from({ length: 5 }, (_, index) => ({
     id: PlanId.make(`plan-${index}`),
     runId,
@@ -67,7 +140,7 @@ describe("client performance", () => {
   });
   test("derive current plan from 5 normalized plans", async ({ bench }) => {
     await bench("derive", () => {
-      deriveActivePlanState(projection, runId);
+      deriveCurrentTaskProgress(projection, runId);
     }).run();
   });
   test("format 24 hourly usage labels and tooltips", async ({ bench }) => {

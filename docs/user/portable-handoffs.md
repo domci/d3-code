@@ -4,18 +4,21 @@ T3 Code transfers conversation context when you switch providers, continue throu
 restart, or use a fork that the provider cannot resume itself.
 
 Short conversations transfer intact. For longer conversations, T3 Code favors recent requests and
-answers, the original request, and relevant activity such as command outcomes. Selected messages
-keep their full text, order, and user or assistant role, including partial work from failed or
-interrupted turns. Your new request stays separate and is never shortened to make history fit.
+answers, the original request, and relevant activity such as command outcomes. Selected conversation
+messages keep their full text, order, and user or assistant role, including partial work from failed
+or interrupted turns. When space is limited, older completed commands with a successful exit code
+may carry explicitly marked excerpts from the beginning and end of their output. Command input and
+outcome stay intact; the newest command and unsuccessful or unknown outcomes retain their full text
+if selected. Your new request stays separate and is never shortened to make history fit.
 
 Codex receives historical messages directly when its installed version supports that operation.
 Other providers receive the same selection as attributed conversation context. A handoff does not
 copy the outgoing provider's reasoning, tool-call state, or attachments.
 
-The handoff includes references to omitted history. The agent can use T3 Code's thread-reading tool
-to retrieve saved messages and activity, including the remainder of a long item. For an important
-constraint, you can still repeat it in your next message. A handoff is a budgeted selection, not an
-agent-written summary.
+The handoff includes references to omitted history and abbreviated output. The agent can use T3
+Code's thread-reading tool to retrieve original saved messages and activity, including the remainder
+of a long item. For an important constraint, you can still repeat it in your next message. A handoff
+is a budgeted selection, not an agent-written summary.
 
 ## Context limits
 

@@ -906,6 +906,7 @@ describe("orchestration v2 provider switching", () => {
           const injectedHistory = yield* Ref.make<ReadonlyArray<unknown>>([]);
           const failOnce = yield* Ref.make(true);
           const generation = yield* Ref.make(0);
+          const layerDatabase = SqlitePersistence.layerMemory;
           const layerRegistry = ProviderAdapterRegistry.layerFromAdapters([
             makeTestAdapter({
               instanceId: CODEX_MODEL_SELECTION.instanceId,
@@ -924,7 +925,7 @@ describe("orchestration v2 provider switching", () => {
               capturedTurns,
               injectedHistory,
               nativeThreadGeneration: generation,
-              getModelContextWindow: () => 32_000,
+              getModelContextWindow: () => (failure === "turn-start" ? 128_000 : 32_000),
               ...(failure !== "injection"
                 ? { failStartOnce: failOnce }
                 : { failInjectionOnce: failOnce }),
@@ -981,6 +982,49 @@ describe("orchestration v2 provider switching", () => {
             });
             yield* dispatch(1, "Original request with constraints", CODEX_MODEL_SELECTION);
             yield* wait(1, "completed");
+            const olderCommandId = TurnItemId.make("retry:older-command");
+            const originalOutput = "HEAD\n" + "original successful log\n".repeat(1_500) + "TAIL";
+            if (failure === "turn-start") {
+              const source = yield* orchestrator.getThreadProjection(threadId);
+              const sourceRun = source.runs[0]!;
+              const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+              const ordinal = yield* projectionStore.getNextTurnItemOrdinal(threadId);
+              const occurredAt = yield* DateTime.now;
+              const sink = yield* EventSink.EventSinkV2;
+              yield* sink.write({
+                events: [
+                  { id: olderCommandId, output: originalOutput },
+                  { id: TurnItemId.make("retry:newest-command"), output: "Newest command result" },
+                ].map((command, index) => ({
+                  id: EventId.make(`retry:command-event:${index}`),
+                  type: "turn-item.updated" as const,
+                  threadId,
+                  runId: sourceRun.id,
+                  providerInstanceId: sourceRun.providerInstanceId,
+                  occurredAt,
+                  payload: {
+                    id: command.id,
+                    type: "command_execution" as const,
+                    threadId,
+                    runId: sourceRun.id,
+                    nodeId: sourceRun.rootNodeId,
+                    providerThreadId: sourceRun.providerThreadId,
+                    providerTurnId: null,
+                    nativeItemRef: null,
+                    parentItemId: null,
+                    ordinal: ordinal + index,
+                    status: "completed" as const,
+                    title: null,
+                    startedAt: occurredAt,
+                    completedAt: occurredAt,
+                    updatedAt: occurredAt,
+                    input: `printf successful-${index}`,
+                    output: command.output,
+                    exitCode: 0,
+                  },
+                })),
+              });
+            }
             yield* dispatch(
               2,
               failure === "large-missed-request" ? "x".repeat(7_000) : "First target request",
@@ -994,6 +1038,19 @@ describe("orchestration v2 provider switching", () => {
               failure !== "injection" ? "injected" : "pending",
             );
             const historyBeforeRetry = (yield* Ref.get(injectedHistory)).length;
+            if (failure === "turn-start") {
+              assert.include(failedHandoff.delivery!.itemIds, olderCommandId);
+              const command = failedHandoff.history!.messages.find(
+                (message) => message.itemId === olderCommandId,
+              )!;
+              assert.include(command.text, "Command output abbreviated:");
+              assert.include(command.text, "HEAD\n");
+              assert.isTrue(command.text.endsWith("TAIL"));
+              assert.notInclude(failedHandoff.delivery!.omittedItemIds ?? [], olderCommandId);
+              const injected = yield* encodeJson(yield* Ref.get(injectedHistory));
+              assert.include(injected, "Command output abbreviated:");
+              assert.notInclude(injected, "original successful log\\n".repeat(1_500));
+            }
             const retryText =
               failure === "large-missed-request" ? "y".repeat(10_000) : "Retry target request";
             yield* dispatch(3, retryText, CLAUDE_MODEL_SELECTION);
@@ -1016,6 +1073,7 @@ describe("orchestration v2 provider switching", () => {
               } else assert.include(delta, "First target request");
               assert.notInclude(delta, "Original request with constraints");
               assert.notInclude(delta, "Original partial work");
+              if (failure === "turn-start") assert.notInclude(delta, "Command output abbreviated:");
               assert.equal(yield* Ref.get(generation), 1);
             } else {
               assert.equal(yield* Ref.get(generation), 2);
@@ -1040,6 +1098,17 @@ describe("orchestration v2 provider switching", () => {
               (yield* orchestrator.getThreadProjection(threadId)).contextHandoffs.length,
               retried.contextHandoffs.length,
             );
+            if (failure === "turn-start") {
+              const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+              const original = yield* projectionStore.getTurnItem({
+                threadId,
+                itemId: olderCommandId,
+              });
+              assert.equal(
+                original?.type === "command_execution" ? original.output : undefined,
+                originalOutput,
+              );
+            }
           }).pipe(
             Effect.provide(
               ProviderReplayHarness.layerWithRegistry(
@@ -1052,7 +1121,8 @@ describe("orchestration v2 provider switching", () => {
                   },
                 },
                 layerRegistry,
-              ),
+                { databaseLayer: layerDatabase },
+              ).pipe(Layer.merge(ProjectionStore.layer.pipe(Layer.provide(layerDatabase)))),
             ),
           );
         }),

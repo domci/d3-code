@@ -1,4 +1,5 @@
 import { resolveThreadWorkingStartedAt } from "@t3tools/client-runtime/state/models";
+import { planItemTime } from "@t3tools/client-runtime/state/thread-plans";
 import {
   type AssetResource,
   type OrchestrationV2ExecutionNode,
@@ -92,17 +93,6 @@ export interface WorkLogEntry {
 
 export type PendingApproval = ThreadPendingApproval;
 export type PendingUserInput = ThreadPendingUserInput;
-
-export interface ActivePlanState {
-  readonly createdAt: string;
-  readonly runId: RunId | null;
-  readonly explanation?: string | null;
-  readonly steps: Array<{
-    readonly step: string;
-    readonly status: "pending" | "inProgress" | "completed";
-    readonly durationMs?: number;
-  }>;
-}
 
 export interface LatestProposedPlanState {
   readonly id: PlanId;
@@ -240,38 +230,6 @@ export function derivePendingUserInputs(
   inputs: ReadonlyArray<ThreadPendingUserInput>,
 ): ThreadPendingUserInput[] {
   return [...inputs].toSorted((left, right) => left.createdAt.localeCompare(right.createdAt));
-}
-
-export function deriveActivePlanState(
-  projection: OrchestrationV2ThreadProjection | null,
-  latestRunId: RunId | undefined,
-): ActivePlanState | null {
-  if (projection === null) return null;
-  const plans = projection.plans.filter((plan) => plan.kind === "todo_list");
-  const plan =
-    [...plans].toReversed().find((candidate) => candidate.runId === latestRunId) ??
-    plans.at(-1) ??
-    null;
-  if (plan === null || plan.steps.length === 0) return null;
-  return {
-    createdAt: planItemTime(projection, plan.id),
-    runId: plan.runId,
-    explanation: plan.explanation ?? null,
-    steps: plan.steps.map(({ text, status, durationMs }) => ({
-      step: text,
-      status: status === "running" ? "inProgress" : status,
-      ...(durationMs === undefined ? {} : { durationMs }),
-    })),
-  };
-}
-
-function planItemTime(projection: OrchestrationV2ThreadProjection, planId: PlanId): string {
-  const item = projection.turnItems.findLast(
-    (candidate) =>
-      (candidate.type === "proposed_plan" || candidate.type === "todo_list") &&
-      candidate.planId === planId,
-  );
-  return DateTime.formatIso(item?.updatedAt ?? projection.updatedAt);
 }
 
 function toLatestProposedPlanState(

@@ -32,6 +32,7 @@ export function ComposerInlineControl(props: {
   readonly accessibilityLabel?: string;
   readonly disabled?: boolean;
   readonly emphasized?: boolean;
+  readonly expanded?: boolean;
   readonly icon?: ComponentProps<typeof SymbolView>["name"];
   readonly renderIcon?: (size: number) => ReactNode;
   readonly label: string;
@@ -49,7 +50,9 @@ export function ComposerInlineControl(props: {
       accessibilityHint={props.accessibilityHint}
       accessibilityRole={props.static ? undefined : "button"}
       accessibilityState={
-        props.static ? undefined : { disabled: props.disabled, selected: props.selected }
+        props.static
+          ? undefined
+          : { disabled: props.disabled, selected: props.selected, expanded: props.expanded }
       }
       className="h-11 flex-row items-center gap-2 rounded-xl px-2 active:bg-subtle"
       disabled={props.disabled || props.static}

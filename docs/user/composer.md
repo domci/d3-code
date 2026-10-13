@@ -193,6 +193,15 @@ Provider commands must start the message to run. T3 Code commands such as
 Send `/compact` in an existing conversation to reduce context usage when the
 provider supports it. Web and desktop also offer compaction from the context meter.
 
+Context usage is shown when the provider reports it, including on mobile. The
+limit and percentage appear only when the provider supplies a context limit.
+On mobile, inspect the report time to judge freshness; disconnected clients show
+the last reported usage.
+
+On mobile, the agent's checklist shows the current step and completed count while
+the task runs. Expand it to inspect the steps. Progress clears when the task ends;
+agents that do not report a checklist have no task progress to show.
+
 ## Goals
 
 With Codex and Claude, send `/goal` followed by what "done" means, for example

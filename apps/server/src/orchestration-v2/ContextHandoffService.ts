@@ -17,6 +17,7 @@ import {
   DEFAULT_HANDOFF_TOKEN_CAP,
   handoffTokenCapConfig,
   handoffCoverage,
+  historyCost,
   historicalMessage,
   renderHistory,
   selectHistory,
@@ -92,6 +93,68 @@ export class ContextHandoffServiceV2 extends Context.Service<
   ContextHandoffServiceV2,
   ContextHandoffServiceV2Shape
 >()("t3/orchestration-v2/ContextHandoffService/ContextHandoffServiceV2") {}
+
+function selectPreparedHistory(input: {
+  readonly items: ReadonlyArray<OrchestrationV2TurnItem>;
+  readonly coverage: string;
+  readonly budget: number;
+  readonly runs?: ReadonlyArray<OrchestrationV2Run>;
+}) {
+  const runStatuses = new Map(input.runs?.map((run) => [run.id, run.status]));
+  const candidates = input.items.flatMap((item) => {
+    const message = historicalMessage(item);
+    return message === null
+      ? []
+      : [
+          {
+            item,
+            message: {
+              ...message,
+              ...(item.runId === null ? {} : { runStatus: runStatuses.get(item.runId) }),
+            },
+          },
+        ];
+  });
+  const selected = selectHistory({ ...input, messages: candidates.map(({ message }) => message) });
+  if (selected.omittedItems === 0) return selected;
+  const newestCommand = input.items.findLast((item) => item.type === "command_execution");
+  return selectHistory({
+    ...input,
+    messages: candidates.map(({ item, message }) => {
+      if (
+        item.type !== "command_execution" ||
+        item === newestCommand ||
+        item.status !== "completed" ||
+        item.exitCode !== 0 ||
+        item.outputIndicatesFailure === true ||
+        item.output === undefined ||
+        Buffer.byteLength(item.output) <= 2_048
+      )
+        return message;
+      // shortcut: retain 1 KiB per edge, tune after measuring handoff task quality.
+      // Bound encoding work to each edge, and cut only at complete UTF-8 characters.
+      const headBytes = Buffer.from(item.output.slice(0, 1_024));
+      let headEnd = Math.min(1_024, headBytes.length);
+      while (((headBytes[headEnd] ?? 0) & 0xc0) === 0x80) headEnd--;
+      const tailBytes = Buffer.from(item.output.slice(-1_024));
+      let tailStart = Math.max(0, tailBytes.length - 1_024);
+      while (((tailBytes[tailStart] ?? 0) & 0xc0) === 0x80) tailStart++;
+      const head = item.output.slice(0, headBytes.subarray(0, headEnd).toString("utf8").length);
+      const tail = item.output.slice(-tailBytes.subarray(tailStart).toString("utf8").length);
+      const omittedBytes =
+        Buffer.byteLength(item.output) - Buffer.byteLength(head) - Buffer.byteLength(tail);
+      const recovery = JSON.stringify({
+        threadId: item.threadId,
+        view: "activity",
+        itemId: item.id,
+        textOffset: 0,
+      });
+      const output = `${head}\n[Command output abbreviated: ${omittedBytes} UTF-8 bytes omitted. Recover with t3_thread_read(${recovery}); paginate with textOffset=nextTextOffset until null.]\n${tail}`;
+      const abbreviated = { ...message, text: historicalMessage({ ...item, output })!.text };
+      return historyCost([abbreviated], "") < historyCost([message], "") ? abbreviated : message;
+    }),
+  });
+}
 
 function compactText(text: string, maxLength = 240): string {
   const compacted = text.replace(/\s+/g, " ").trim();
@@ -261,11 +324,8 @@ const makeContextHandoffService = Effect.fn("orchestrationV2.ContextHandoffServi
             ),
           );
         const coverage = handoffCoverage({ ...input, coveredRunOrdinals: { from: 1, to: 1 } });
-        const selected = selectHistory({
-          messages: input.items.flatMap((item) => {
-            const message = historicalMessage(item);
-            return message === null ? [] : [message];
-          }),
+        const selected = selectPreparedHistory({
+          items: input.items,
           coverage,
           budget: tokenCap,
         });
@@ -374,11 +434,8 @@ const makeContextHandoffService = Effect.fn("orchestrationV2.ContextHandoffServi
           coveredRunOrdinals: input.coveredRunOrdinals,
           items: input.deltaItems,
         });
-        const selected = selectHistory({
-          messages: input.deltaItems.flatMap((item) => {
-            const message = historicalMessage(item);
-            return message === null ? [] : [message];
-          }),
+        const selected = selectPreparedHistory({
+          items: input.deltaItems,
           coverage,
           budget: tokenCap,
         });
@@ -444,20 +501,10 @@ const makeContextHandoffService = Effect.fn("orchestrationV2.ContextHandoffServi
               }),
           ),
         );
-      const runStatuses = new Map(input.runs?.map((run) => [run.id, run.status]));
       const coverage = handoffCoverage(input);
-      const selected = selectHistory({
-        messages: input.items.flatMap((item) => {
-          const message = historicalMessage(item);
-          return message === null
-            ? []
-            : [
-                {
-                  ...message,
-                  ...(item.runId === null ? {} : { runStatus: runStatuses.get(item.runId) }),
-                },
-              ];
-        }),
+      const selected = selectPreparedHistory({
+        items: input.items,
+        ...(input.runs === undefined ? {} : { runs: input.runs }),
         coverage,
         budget: tokenCap,
       });

@@ -3,6 +3,8 @@ import { readEnvironmentScope } from "./session";
 import type { ComposerTextPaste } from "../native/T3ComposerEditor.types";
 import { useAtomValue } from "@effect/atom-react";
 import { threadRuntimeIsActive } from "@t3tools/client-runtime/state/shell";
+import { deriveLatestContextWindowSnapshot } from "@t3tools/client-runtime/context-window";
+import { deriveCurrentTaskProgress } from "@t3tools/client-runtime/state/thread-plans";
 import {
   deriveProviderSubagentStatus,
   deriveRunlessWorkStartedAt,
@@ -184,6 +186,14 @@ export function useThreadComposerState() {
   } = useThreadSelection();
   const selectedThreadProjection = useSelectedThreadProjection();
   const selectedThreadVisibleTurnItems = useSelectedThreadVisibleTurnItems();
+  const contextWindow = useMemo(
+    () =>
+      deriveLatestContextWindowSnapshot(
+        selectedThreadVisibleTurnItems,
+        selectedThreadProjection?.projection ?? null,
+      ),
+    [selectedThreadProjection, selectedThreadVisibleTurnItems],
+  );
   const composerDrafts = useAtomValue(composerDraftsAtom);
   const acknowledgedMessages = useAtomValue(acknowledgedThreadMessagesAtom);
   const queuedMessagesByThreadKey = useThreadOutboxMessages();
@@ -365,6 +375,27 @@ export function useThreadComposerState() {
         ? deriveThreadActivityRun(selectedThreadProjection.projection)
         : (selectedThreadShell?.latestRun ?? null),
     [selectedThreadProjection, selectedThreadShell?.latestRun],
+  );
+  const taskThread = selectedThreadProjection?.projection.thread;
+  const taskRuns = selectedThreadProjection?.projection.runs;
+  const taskAttempts = selectedThreadProjection?.projection.attempts;
+  const taskNodes = selectedThreadProjection?.projection.nodes;
+  const taskPlans = selectedThreadProjection?.projection.plans;
+  const taskProgress = useMemo(
+    () =>
+      deriveCurrentTaskProgress(
+        taskThread && taskRuns && taskAttempts && taskNodes && taskPlans
+          ? {
+              thread: taskThread,
+              runs: taskRuns,
+              attempts: taskAttempts,
+              nodes: taskNodes,
+              plans: taskPlans,
+            }
+          : null,
+        selectedThreadActivityRun?.runId,
+      ),
+    [selectedThreadActivityRun?.runId, taskThread, taskRuns, taskAttempts, taskNodes, taskPlans],
   );
 
   const isCompacting = useMemo(() => {
@@ -1051,6 +1082,8 @@ export function useThreadComposerState() {
   );
 
   return {
+    contextWindow,
+    taskProgress,
     feedbackSubmissions,
     dismissFeedback,
     selectedThreadFeed,

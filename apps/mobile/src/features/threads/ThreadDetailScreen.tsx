@@ -144,8 +144,12 @@ import { useThreadQueuedCount } from "./ThreadQueueControl";
 import type { ThreadContentPresentation } from "./threadContentPresentation";
 import { resolveThreadFeedSubmissionAnchor } from "./thread-feed-live-follow";
 import { useGlobalVoiceInput } from "../voice-input/VoiceInputProvider";
+import type { ContextWindowSnapshot } from "@t3tools/client-runtime/context-window";
+import type { ThreadTaskProgress } from "@t3tools/client-runtime/state/thread-plans";
 
 export interface ThreadDetailScreenProps {
+  readonly contextWindow: ContextWindowSnapshot | null;
+  readonly taskProgress: ThreadTaskProgress | null;
   readonly worktreeSetup?: WorktreeSetupCardProps | null;
   readonly setupWorkingStartedAt?: string | null;
   readonly canOperateThread: boolean;
@@ -1374,6 +1378,8 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                 ) : (
                   <>
                     <ThreadComposer
+                      contextWindow={props.contextWindow}
+                      taskProgress={props.taskProgress}
                       canOperateThread={props.canOperateThread}
                       reportedModelSelection={reportedModelSelection}
                       editorRef={composerEditorRef}

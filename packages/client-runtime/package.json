@@ -3,6 +3,14 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./context-window": {
+      "types": "./src/contextWindow.ts",
+      "default": "./src/contextWindow.ts"
+    },
+    "./state/thread-plans": {
+      "types": "./src/state/threadPlans.ts",
+      "default": "./src/state/threadPlans.ts"
+    },
     "./composerThreadItems": {
       "types": "./src/composerThreadItems.ts",
       "default": "./src/composerThreadItems.ts"
