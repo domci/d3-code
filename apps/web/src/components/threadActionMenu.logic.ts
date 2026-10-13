@@ -7,6 +7,9 @@ import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled"
  * remains data-driven.
  */
 export type ThreadActionMenuId =
+  | "move-to-folder"
+  | "move-to-project-root"
+  | `folder:${string}`
   | "new-thread-on-branch"
   | "filter-by-project"
   | "project-settings"

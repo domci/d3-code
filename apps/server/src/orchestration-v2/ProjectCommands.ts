@@ -6,6 +6,7 @@ import {
   type ProjectIconOverride,
   ProjectId,
   type ProjectScript,
+  type ProjectThreadFolderOperation,
   SCRIPT_RUN_COMMAND_PATTERN,
   type ThreadEnvMode,
 } from "@t3tools/contracts";
@@ -26,6 +27,7 @@ export interface ProjectCreateCommand {
 }
 
 export interface ProjectMetaUpdateCommand {
+  readonly threadFolderOperation?: ProjectThreadFolderOperation;
   readonly type: "project.meta.update";
   readonly commandId: CommandId;
   readonly projectId: ProjectId;
@@ -103,6 +105,8 @@ export const decodeProjectCommandRejection = Schema.decodeUnknownOption(
 );
 
 export interface ProjectCommandState {
+  readonly folderThreadProjectId?: ProjectId | null;
+  readonly folderThreadIsSubagent?: boolean;
   /** The target project's row, including a soft-deleted one; only create sees deleted rows as taken. */
   readonly project: ProjectRow | undefined;
   /** The active project that holds the command's requested workspace root, if any. */
@@ -183,6 +187,47 @@ export function planProjectCommand(input: {
     case "project.meta.update": {
       const project = activeProject;
       if (project === undefined) return missingProject();
+      let threadFolders = project.threadFolders ?? [];
+      const operation = command.threadFolderOperation;
+      if (operation !== undefined) {
+        if (operation.type === "move" && state.folderThreadProjectId !== command.projectId) {
+          return invariant("The thread does not belong to this project.");
+        }
+        if (operation.type === "move" && state.folderThreadIsSubagent) {
+          return invariant("Subagents stay in their parent thread's folder.");
+        }
+        const folderId = operation.type === "move" ? operation.folderId : operation.id;
+        const folder = threadFolders.find((entry) => entry.id === folderId);
+        if (operation.type === "create") {
+          if (folder !== undefined) return invariant("Folder already exists.");
+          threadFolders = [
+            ...threadFolders,
+            { id: operation.id, name: operation.name, threadIds: [] },
+          ];
+        } else {
+          if (folderId !== null && folder === undefined)
+            return invariant("Folder no longer exists.");
+          switch (operation.type) {
+            case "rename":
+              threadFolders = threadFolders.map((entry) =>
+                entry.id === operation.id ? { ...entry, name: operation.name } : entry,
+              );
+              break;
+            case "delete":
+              threadFolders = threadFolders.filter((entry) => entry.id !== operation.id);
+              break;
+            case "move":
+              threadFolders = threadFolders.map((entry) => ({
+                ...entry,
+                threadIds: [
+                  ...entry.threadIds.filter((id) => id !== operation.threadId),
+                  ...(entry.id === operation.folderId ? [operation.threadId] : []),
+                ],
+              }));
+              break;
+          }
+        }
+      }
       if (
         command.projectIcon?.kind === "monogram" &&
         Array.from(monogramSegmenter.segment(command.projectIcon.text)).length > 2
@@ -223,6 +268,7 @@ export function planProjectCommand(input: {
           ...(command.faviconPath === undefined ? {} : { faviconPath: command.faviconPath }),
           ...(command.projectIcon === undefined ? {} : { projectIcon: command.projectIcon }),
           ...(command.scripts === undefined ? {} : { scripts: command.scripts }),
+          ...(operation === undefined ? {} : { threadFolders }),
           updatedAt: occurredAt,
         },
       });

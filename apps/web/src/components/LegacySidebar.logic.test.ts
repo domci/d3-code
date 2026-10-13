@@ -306,6 +306,27 @@ describe("manual session order", () => {
     expect(ids([...(childrenByParentKey.get("e:p") ?? [])])).toEqual(["c"]);
   });
 
+  it("keeps subagents with their parent while allowing forks in another folder", () => {
+    const { active, childrenByParentKey } = buildProjectThreadOrder(
+      [
+        make("parent", "2026-01-01T00:00:00Z"),
+        make("child", "2026-01-02T00:00:00Z", {
+          lineage: { relationshipToParent: "subagent", parentThreadId: "parent" },
+        }),
+        make("fork", "2026-01-03T00:00:00Z", {
+          lineage: { relationshipToParent: "fork", parentThreadId: "parent" },
+        }),
+      ],
+      "manual",
+      new Map([
+        ["e:parent", "one"],
+        ["e:fork", "two"],
+      ]),
+    );
+    expect(ids(active)).toEqual(["fork", "parent"]);
+    expect(ids(childrenByParentKey.get("e:parent") ?? [])).toEqual(["child"]);
+  });
+
   describe("planActiveThreadMove", () => {
     const keyed = [
       make("a", "2026-01-01T00:00:00Z", { activeOrderKey: "d" }),

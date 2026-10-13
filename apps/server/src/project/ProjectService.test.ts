@@ -1,6 +1,14 @@
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { CommandId, type Project, ProjectId, ProviderInstanceId } from "@t3tools/contracts";
+import {
+  CommandId,
+  EventId,
+  type Project,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+} from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -56,6 +64,7 @@ const layerTestFor = (
   >,
 ) =>
   RuntimeLayer.layerProjectService.pipe(
+    Layer.provideMerge(Layer.mergeAll(ProjectStore.layer, ProjectionStore.layer)),
     Layer.provideMerge(ProjectEnrichmentService.layer),
     Layer.provideMerge(layerWorkspacePaths),
     Layer.provideMerge(projectMetadataLayer),
@@ -95,6 +104,109 @@ const waitForProject = Effect.fn("ProjectServiceTest.waitForProject")(function* 
   }
   return yield* Effect.die(`Project ${projectId} was not enriched in time.`);
 });
+
+it.effect("persists folder changes and keeps threads when their folder is deleted", () =>
+  Effect.gen(function* () {
+    const service = yield* ProjectService.ProjectService;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const projectStore = yield* ProjectStore.ProjectStoreV2;
+    const projectId = ProjectId.make("project:folders");
+    const threadId = ThreadId.make("thread:folders");
+    const now = yield* DateTime.now;
+    yield* service.create({
+      commandId: CommandId.make("folders:create-project"),
+      projectId,
+      title: "Folders",
+      workspaceRoot: "/work/folders",
+    });
+    yield* projections.apply({
+      id: EventId.make("folders:create-thread"),
+      type: "thread.created",
+      threadId,
+      occurredAt: now,
+      payload: {
+        createdBy: "user",
+        creationSource: "web",
+        id: threadId,
+        projectId,
+        title: "Keep me",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        activeProviderThreadId: null,
+        lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+        forkedFrom: null,
+        createdAt: now,
+        updatedAt: now,
+        archivedAt: null,
+        settledOverride: null,
+        settledAt: null,
+        lastVisitedAt: null,
+        deletedAt: null,
+      },
+    });
+    const createFolder = {
+      commandId: CommandId.make("folders:create"),
+      projectId,
+      threadFolderOperation: { type: "create" as const, id: "one", name: "First" },
+    };
+    yield* service.update(createFolder);
+    yield* service.update(createFolder);
+    yield* service.update({
+      commandId: CommandId.make("folders:move"),
+      projectId,
+      threadFolderOperation: { type: "move", folderId: "one", threadId },
+    });
+    yield* Effect.all(
+      [
+        service.update({
+          commandId: CommandId.make("folders:rename"),
+          projectId,
+          threadFolderOperation: { type: "rename", id: "one", name: "Renamed" },
+        }),
+        service.update({
+          commandId: CommandId.make("folders:second"),
+          projectId,
+          threadFolderOperation: { type: "create", id: "two", name: "Second" },
+        }),
+      ],
+      { concurrency: "unbounded" },
+    );
+    const expected = [
+      { id: "one", name: "Renamed", threadIds: [threadId] },
+      { id: "two", name: "Second", threadIds: [] },
+    ];
+    assert.deepEqual(Option.getOrThrow(yield* service.getById(projectId)).threadFolders, expected);
+    assert.deepEqual(
+      Option.getOrThrow(yield* projectStore.getShell(projectId)).threadFolders,
+      expected,
+    );
+    yield* service.update({
+      commandId: CommandId.make("folders:delete"),
+      projectId,
+      threadFolderOperation: { type: "delete", id: "one" },
+    });
+    assert.deepEqual(Option.getOrThrow(yield* service.getById(projectId)).threadFolders, [
+      expected[1]!,
+    ]);
+    assert.equal((yield* projections.getThreadShell(threadId))?.title, "Keep me");
+    const rejected = yield* service
+      .update({
+        commandId: CommandId.make("folders:missing-thread"),
+        projectId,
+        threadFolderOperation: {
+          type: "move",
+          folderId: "two",
+          threadId: ThreadId.make("missing"),
+        },
+      })
+      .pipe(Effect.flip);
+    assert.equal(rejected._tag, "ProjectOperationError");
+  }).pipe(Effect.provide(layerTest)),
+);
 
 it.layer(layerTest)("ProjectService", (it) => {
   it.effect("creates, updates, resolves, snapshots, and soft-deletes projects", () =>

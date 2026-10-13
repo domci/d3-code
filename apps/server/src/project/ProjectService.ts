@@ -176,6 +176,7 @@ export const make = Effect.gen(function* () {
     autoPull: row.autoPull,
     projectIcon: row.projectIcon,
     scripts: row.scripts,
+    threadFolders: row.threadFolders ?? [],
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     deletedAt: row.deletedAt,
@@ -242,9 +243,20 @@ export const make = Effect.gen(function* () {
       const eventId = yield* idAllocator.allocate
         .event({ commandId: command.commandId })
         .pipe(Effect.mapError(dispatchError));
+      const folderThread =
+        command.type === "project.meta.update" && command.threadFolderOperation?.type === "move"
+          ? yield* threadProjections
+              .getThreadShell(command.threadFolderOperation.threadId)
+              .pipe(Effect.mapError(dispatchError))
+          : null;
       const planned = planProjectCommand({
         command,
-        state: { project, workspaceOwner },
+        state: {
+          project,
+          workspaceOwner,
+          folderThreadProjectId: folderThread?.projectId ?? null,
+          folderThreadIsSubagent: folderThread?.lineage.relationshipToParent === "subagent",
+        },
         eventId,
         now,
       });
@@ -387,6 +399,9 @@ export const make = Effect.gen(function* () {
           ? {}
           : { defaultModelSelection: input.defaultModelSelection }),
         ...(input.autoPull === undefined ? {} : { autoPull: input.autoPull }),
+        ...(input.threadFolderOperation === undefined
+          ? {}
+          : { threadFolderOperation: input.threadFolderOperation }),
         ...(input.projectIcon === undefined ? {} : { projectIcon: input.projectIcon }),
         ...(faviconPath === undefined ? {} : { faviconPath }),
         ...(input.defaultThreadEnvMode === undefined

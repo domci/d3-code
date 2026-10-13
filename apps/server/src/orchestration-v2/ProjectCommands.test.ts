@@ -4,6 +4,7 @@ import {
   EventId,
   ProjectId,
   ProviderInstanceId,
+  ThreadId,
   type ModelSelection,
   type ProjectScript,
 } from "@t3tools/contracts";
@@ -79,6 +80,61 @@ const failureOf = (result: ReturnType<typeof plan>) => {
 };
 
 describe("planProjectCommand", () => {
+  it("moves threads between folders and back to the project without duplicating membership", () => {
+    const threadId = ThreadId.make("thread-a");
+    const other = ThreadId.make("thread-b");
+    const command: ProjectCommand = {
+      type: "project.meta.update",
+      commandId: CommandId.make("folder-move"),
+      projectId,
+      threadFolderOperation: { type: "move", folderId: "b", threadId },
+    };
+    const project = row({
+      threadFolders: [
+        { id: "a", name: "First", threadIds: [threadId, other] },
+        { id: "b", name: "Second", threadIds: [] },
+      ],
+    });
+    const moved = payloadOf(
+      plan(command, { project, folderThreadProjectId: projectId }),
+    ).threadFolders;
+    assert.deepEqual(moved, [
+      { id: "a", name: "First", threadIds: [other] },
+      { id: "b", name: "Second", threadIds: [threadId] },
+    ]);
+    assert.deepEqual(
+      payloadOf(
+        plan(
+          { ...command, threadFolderOperation: { type: "move", folderId: null, threadId } },
+          { project, folderThreadProjectId: projectId },
+        ),
+      ).threadFolders,
+      [
+        { id: "a", name: "First", threadIds: [other] },
+        { id: "b", name: "Second", threadIds: [] },
+      ],
+    );
+    assert.equal(
+      failureOf(plan(command, { project, folderThreadProjectId: ProjectId.make("other") }))._tag,
+      "ProjectCommandInvariantError",
+    );
+    assert.equal(
+      failureOf(
+        plan(command, { project, folderThreadProjectId: projectId, folderThreadIsSubagent: true }),
+      )._tag,
+      "ProjectCommandInvariantError",
+    );
+    assert.equal(
+      failureOf(
+        plan(
+          { ...command, threadFolderOperation: { type: "move", folderId: "missing", threadId } },
+          { project, folderThreadProjectId: projectId },
+        ),
+      )._tag,
+      "ProjectCommandInvariantError",
+    );
+  });
+
   it("creates projects with empty scripts and no model default", () => {
     const result = plan({
       type: "project.create",

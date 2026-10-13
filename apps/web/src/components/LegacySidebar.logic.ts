@@ -42,6 +42,7 @@ const subagentTreeKey = (thread: Pick<SidebarThreadSummary, "id" | "environmentI
 export function buildSubagentTree<T extends SubagentTreeThread>(
   threads: readonly T[],
   maxDepth: number = MAX_SUBAGENT_TREE_DEPTH,
+  folderByThreadKey?: ReadonlyMap<string, string>,
 ): { readonly roots: T[]; readonly childrenByParentKey: ReadonlyMap<string, readonly T[]> } {
   const roots: T[] = [];
   const rawChildren = new Map<string, T[]>();
@@ -54,6 +55,7 @@ export function buildSubagentTree<T extends SubagentTreeThread>(
       const source = parentId === null || parentId === undefined ? undefined : byKey.get(parentKey);
       if (
         !source ||
+        folderByThreadKey?.get(parentKey) !== folderByThreadKey?.get(subagentTreeKey(thread)) ||
         source.lineage.relationshipToParent === "subagent" ||
         (source.settledOverride === "settled") !== (thread.settledOverride === "settled")
       ) {
@@ -181,13 +183,18 @@ export function describeSubagentCounts(running: number, finished: number): strin
 export function buildProjectThreadOrder<T extends SidebarThreadSummary>(
   threads: readonly T[],
   sortOrder: SidebarThreadSortOrder,
+  folderByThreadKey?: ReadonlyMap<string, string>,
 ): {
   readonly roots: T[];
   readonly active: T[];
   readonly settled: T[];
   readonly childrenByParentKey: ReadonlyMap<string, readonly T[]>;
 } {
-  const { roots, childrenByParentKey } = buildSubagentTree(sortThreads(threads, sortOrder));
+  const { roots, childrenByParentKey } = buildSubagentTree(
+    sortThreads(threads, sortOrder),
+    MAX_SUBAGENT_TREE_DEPTH,
+    folderByThreadKey,
+  );
   const { active, settled } = partitionSettledThreads(roots);
   return {
     roots,

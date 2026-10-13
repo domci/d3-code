@@ -43,6 +43,17 @@ in a new thread's model picker to add or remove them. A regular click returns to
 single model. Choose a base branch and send. Each selection starts a separate thread
 and worktree while you stay in the new thread composer. This requires a Git project.
 
+## Organize threads into folders
+
+In the project tree on web or desktop, right-click a project and choose **New folder**.
+Drag a thread onto a folder, or choose **Move to folder** from the thread's menu.
+Drop it on **Unfiled threads**, or choose **Project root**, to move it back out.
+Use a folder's menu to rename or delete it. Deleting a folder keeps its threads.
+
+Folders belong to one project and sync to other devices connected to that environment.
+Subagents stay with their parent thread. Folders have one level; the flat inbox and
+native mobile lists continue to show threads without folder grouping.
+
 ## Pin and reorder threads
 
 Pin a thread from its menu to keep it above your active work.

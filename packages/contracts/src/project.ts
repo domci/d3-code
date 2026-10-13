@@ -175,6 +175,33 @@ export const ReceivedProjectIcon = ForwardCompatibleUnion(projectIconMembers, "k
   ),
 );
 
+export const ProjectThreadFolder = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString.pipe(Schema.check(Schema.isMaxLength(100))),
+  threadIds: Schema.Array(ThreadId),
+});
+export type ProjectThreadFolder = typeof ProjectThreadFolder.Type;
+
+export const ProjectThreadFolderOperation = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("create"),
+    id: TrimmedNonEmptyString,
+    name: ProjectThreadFolder.fields.name,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("rename"),
+    id: TrimmedNonEmptyString,
+    name: ProjectThreadFolder.fields.name,
+  }),
+  Schema.Struct({ type: Schema.Literal("delete"), id: TrimmedNonEmptyString }),
+  Schema.Struct({
+    type: Schema.Literal("move"),
+    folderId: Schema.NullOr(TrimmedNonEmptyString),
+    threadId: ThreadId,
+  }),
+]);
+export type ProjectThreadFolderOperation = typeof ProjectThreadFolderOperation.Type;
+
 export const Project = Schema.Struct({
   id: ProjectId,
   title: TrimmedNonEmptyString,
@@ -182,6 +209,7 @@ export const Project = Schema.Struct({
   repositoryIdentity: Schema.optional(Schema.NullOr(RepositoryIdentity)),
   faviconPath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   projectIcon: Schema.optional(Schema.NullOr(ReceivedProjectIcon)),
+  threadFolders: Schema.optional(Schema.Array(ProjectThreadFolder)),
   defaultModelSelection: Schema.NullOr(ModelSelection),
   defaultThreadEnvMode: Schema.optional(Schema.NullOr(ThreadEnvMode)),
   // Opt-in because background sync performs network I/O and may move the checkout.
@@ -219,6 +247,7 @@ export const ProjectCreatePayload = Schema.Struct({
 export type ProjectCreatePayload = typeof ProjectCreatePayload.Type;
 
 export const ProjectUpdatePayload = Schema.Struct({
+  threadFolderOperation: Schema.optional(ProjectThreadFolderOperation),
   title: Schema.optional(TrimmedNonEmptyString),
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
