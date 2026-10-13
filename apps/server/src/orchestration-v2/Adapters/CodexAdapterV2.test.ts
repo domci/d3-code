@@ -60,6 +60,7 @@ import * as EffectWorker from "../EffectWorker.ts";
 import * as Orchestrator from "../Orchestrator.ts";
 import * as ProviderReplayHarness from "../testkit/ProviderReplayHarness.ts";
 import {
+  ProviderAdapterEventStreamError,
   ProviderAdapterForkThreadError,
   ProviderAdapterOpenSessionError,
   ProviderAdapterRollbackThreadError,
@@ -8520,4 +8521,56 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       }).pipe(Effect.scoped, Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
     );
   });
+});
+
+describe("CodexAdapterV2 app-server exit", () => {
+  // The session manager only releases a session when its event stream ends, so
+  // a killed app-server must fail the stream instead of staying cached.
+  it.effect("fails the session event stream when the app-server process exits", () =>
+    Effect.gen(function* () {
+      const transcript = makeCodexReplayTranscript({ scenario: "app-server-exit", entries: [] });
+      const driver = yield* CodexReplay.makeReplayDriver(transcript, {});
+      const exitHook =
+        yield* Ref.make<CodexClient.CodexAppServerClientOptions["onTermination"]>(undefined);
+      const adapter = CodexAdapterV2.makeCodexAdapterV2({
+        instanceId: CodexAdapterV2.CODEX_DEFAULT_INSTANCE_ID,
+        settings: DEFAULT_CODEX_SETTINGS,
+        environment: {},
+        clientFactory: {
+          open: (openInput) =>
+            Ref.set(exitHook, openInput.onTermination).pipe(
+              Effect.andThen(Layer.build(CodexReplay.layerReplayWithDriver(driver))),
+              Effect.flatMap((context) =>
+                Effect.service(CodexClient.CodexAppServerClient).pipe(Effect.provide(context)),
+              ),
+              Effect.mapError(
+                (cause) =>
+                  new ProviderAdapterOpenSessionError({
+                    driver: CodexAdapterV2.CODEX_DRIVER_KIND,
+                    providerSessionId: openInput.providerSessionId,
+                    cause,
+                  }),
+              ),
+            ),
+        },
+        crypto: yield* Crypto.Crypto,
+        fileSystem: yield* FileSystem.FileSystem,
+        idAllocator: yield* IdAllocator.IdAllocatorV2,
+        serverConfig: yield* makeReplayServerConfig(transcript.scenario).pipe(Effect.orDie),
+      });
+      const runtime = yield* adapter.openSession({
+        threadId: ThreadId.make("thread-app-server-exit"),
+        providerSessionId: ProviderSessionId.make("provider-session-app-server-exit"),
+        modelSelection: CODEX_TEST_MODEL_SELECTION,
+        runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+      });
+
+      const notifyExit = yield* Ref.get(exitHook);
+      if (notifyExit === undefined) return assert.fail("session did not register onTermination");
+      yield* notifyExit(new CodexError.CodexAppServerProcessExitedError({ code: 137, pid: 1 }));
+
+      const error = yield* Stream.runDrain(runtime.events).pipe(Effect.flip);
+      assert.instanceOf(error, ProviderAdapterEventStreamError);
+    }).pipe(Effect.scoped, Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+  );
 });

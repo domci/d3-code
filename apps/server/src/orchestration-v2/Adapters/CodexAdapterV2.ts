@@ -130,6 +130,7 @@ import {
 } from "../AttachmentPrompt.ts";
 import {
   ProviderAdapterEnsureThreadError,
+  ProviderAdapterEventStreamError,
   ProviderAdapterForkThreadError,
   ProviderAdapterInterruptError,
   ProviderAdapterOpenSessionError,
@@ -1258,6 +1259,8 @@ export interface CodexAppServerClientFactoryShape {
     readonly runtimePolicy: ProviderAdapterV2RuntimePolicy;
     readonly settings: CodexSettings;
     readonly environment: NodeJS.ProcessEnv;
+    /** Runs when the app-server process dies, so the session can be released. */
+    readonly onTermination?: CodexClient.CodexAppServerClientOptions["onTermination"];
   }) => Effect.Effect<
     CodexClient.CodexAppServerClient["Service"],
     ProviderAdapterOpenSessionError,
@@ -1507,14 +1510,12 @@ export const layerAppServerClientFactory: Layer.Layer<
             threadId: input.threadId,
             providerSessionId: input.providerSessionId,
           });
-          const clientOptions: CodexClient.CodexAppServerClientOptions =
-            protocolLogger === undefined
+          const clientOptions: CodexClient.CodexAppServerClientOptions = {
+            ...(protocolLogger === undefined
               ? {}
-              : {
-                  logIncoming: true,
-                  logOutgoing: true,
-                  logger: protocolLogger,
-                };
+              : { logIncoming: true, logOutgoing: true, logger: protocolLogger }),
+            ...(input.onTermination === undefined ? {} : { onTermination: input.onTermination }),
+          };
           const context = yield* Layer.build(CodexClient.layerChildProcess(handle, clientOptions));
           return yield* Effect.service(CodexClient.CodexAppServerClient).pipe(
             Effect.provide(context),
@@ -1667,7 +1668,20 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
                     }),
                 ),
               );
+        // Codex can be killed from outside (e.g. earlyoom). The session manager
+        // only releases a session when its event stream ends, so surface the exit
+        // there; otherwise every later request reuses the dead process.
+        const processExited = yield* Deferred.make<never, ProviderAdapterEventStreamError>();
         const client = yield* clientFactory.open({
+          onTermination: (cause) =>
+            Deferred.fail(
+              processExited,
+              new ProviderAdapterEventStreamError({
+                driver: CODEX_PROVIDER,
+                providerSessionId: input.providerSessionId,
+                cause,
+              }),
+            ).pipe(Effect.asVoid),
           instanceId: adapterOptions.instanceId,
           threadId: input.threadId,
           providerSessionId: input.providerSessionId,
@@ -6028,7 +6042,9 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
           driver: CODEX_PROVIDER,
           providerSessionId: input.providerSessionId,
           providerSession: session,
-          events: Stream.fromEffectRepeat(Queue.take(events)),
+          events: Stream.fromEffectRepeat(
+            Effect.raceFirst(Queue.take(events), Deferred.await(processExited)),
+          ),
           canReuseContextUsage: canReuseCodexContextUsage,
           // Known gap: a subagent that Codex resumes later reads as completed
           // (not pending) between turns, so idle release can win the race
