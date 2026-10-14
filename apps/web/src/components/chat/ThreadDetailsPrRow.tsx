@@ -57,6 +57,7 @@ import {
   resolvePullRequestState,
 } from "../pullRequest/pullRequestPresentation";
 import {
+  type PullRequestHandoffWorkspace,
   usePullRequestActionRunner,
   usePullRequestHandoffs,
   writeTaskToComposer,
@@ -96,6 +97,7 @@ export function ThreadDetailsPrRow({
   onActed,
   onStopWatching,
   composerDraftTarget,
+  sourceWorkspace,
 }: {
   environmentId: EnvironmentId;
   pr: ThreadPr;
@@ -113,6 +115,11 @@ export function ThreadDetailsPrRow({
   onStopWatching?: (() => void) | undefined;
   /** The viewed thread's composer, which "Fix in this session" writes the task into. */
   composerDraftTarget?: ScopedThreadRef | DraftId | undefined;
+  /**
+   * The viewed thread's checkout. "Fix/Resolve in new session" keeps this worktree and branch
+   * instead of preparing another one.
+   */
+  sourceWorkspace?: PullRequestHandoffWorkspace | null;
 }) {
   const serverConfigs = useServerConfigs();
   const supportsPullRequests =
@@ -204,7 +211,7 @@ export function ThreadDetailsPrRow({
       });
       return;
     }
-    void startHandoff("conflicts", task);
+    void startHandoff("conflicts", task, "worktree", sourceWorkspace);
   };
 
   const startFixChecks = (where: "here" | "new") => {
@@ -231,7 +238,7 @@ export function ThreadDetailsPrRow({
       });
       return;
     }
-    void startHandoff("findings", task);
+    void startHandoff("findings", task, "worktree", sourceWorkspace);
   };
 
   // Host details distinguish drafts; all panels share the same PR-state glyph.
@@ -334,7 +341,9 @@ export function ThreadDetailsPrRow({
           pending: handoff === "conflicts",
           destructive: true,
           suffix: <ArrowUpRightIcon aria-hidden className="size-3 shrink-0" />,
-          tooltip: "Check the branch out and resolve the conflicts in a new thread",
+          tooltip: sourceWorkspace?.worktreePath
+            ? "Resolve the conflicts in a new session on this worktree"
+            : "Check the branch out and resolve the conflicts in a new thread",
           onClick: () => startResolveConflicts("new"),
         }
       : rowAction === "ready"
@@ -354,7 +363,9 @@ export function ThreadDetailsPrRow({
               pending: handoff === "findings",
               destructive: true,
               suffix: <ArrowUpRightIcon aria-hidden className="size-3 shrink-0" />,
-              tooltip: "Fix the failing checks in a new thread",
+              tooltip: sourceWorkspace?.worktreePath
+                ? "Fix the failing checks in a new session on this worktree"
+                : "Fix the failing checks in a new thread",
               onClick: () => startFixChecks("new"),
             }
           : rowAction === "merge"

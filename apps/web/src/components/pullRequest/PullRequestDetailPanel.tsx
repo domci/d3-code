@@ -53,7 +53,7 @@ import {
   type ReactNode,
 } from "react";
 
-import type { DraftId } from "~/composerDraftStore";
+import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { isCommandPaletteOpen } from "~/commandPaletteBus";
@@ -65,6 +65,7 @@ import {
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { PullRequestFixMenu } from "./PullRequestFixMenu";
 import {
+  canReusePullRequestHandoffWorkspace,
   usePullRequestDefaultMergeMethodResolver,
   writeTaskToComposer,
 } from "./usePullRequestActions";
@@ -73,7 +74,7 @@ import { usePreparePullRequestThreadAction } from "~/lib/sourceControlActions";
 import { cn } from "~/lib/utils";
 import { readLocalApi } from "~/localApi";
 import type { ReviewCommentContext } from "~/reviewCommentContext";
-import { useProjects, useServerConfigs } from "~/state/entities";
+import { useProjects, useServerConfigs, useThreadShell } from "~/state/entities";
 import { useEnvironments } from "~/state/environments";
 import { useEnvironmentQuery } from "~/state/query";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
@@ -1049,6 +1050,18 @@ export function PullRequestDetailPanel({
   };
 
   const attachTarget = composerDraftTarget ?? null;
+  const sourceThreadRef =
+    threadRef ?? (typeof composerDraftTarget === "object" ? composerDraftTarget : null);
+  const sourceThreadShell = useThreadShell(sourceThreadRef);
+  const sourceDraftSession = useComposerDraftStore((store) => {
+    if (typeof composerDraftTarget === "string") return store.getDraftSession(composerDraftTarget);
+    if (sourceThreadRef !== null) return store.getDraftThreadByRef(sourceThreadRef);
+    return null;
+  });
+  const sourceWorkspace = {
+    branch: sourceThreadShell?.branch ?? sourceDraftSession?.branch ?? null,
+    worktreePath: sourceThreadShell?.worktreePath ?? sourceDraftSession?.worktreePath ?? null,
+  };
   const canPrepareWorktree = prepareThread.isAllowed && canOperateThread;
   const canFixFindings = attachTarget !== null || canPrepareWorktree;
   const handoffLabels = pullRequestHandoffLabels(attachTarget !== null);
@@ -1122,7 +1135,8 @@ export function PullRequestDetailPanel({
 
   // Every handoff works the same way: check the pull request out into its own worktree, open a
   // thread there, and — when it carries a task — put that in the composer for the user to read
-  // before sending. Checking out is the whole point of the ones that carry nothing.
+  // before sending. Checking out is the whole point of the ones that carry nothing. The exception
+  // is a "new session" from a thread that is already on the pull request: keep that checkout.
   const startHandoff = async (
     kind: string,
     task: { prompt: string; reviewComments?: ReadonlyArray<ReviewCommentContext> } | null,
@@ -1140,6 +1154,47 @@ export function PullRequestDetailPanel({
         type: "success",
         title: "Added to the composer",
         description: "The task is in the composer — read it over, then send.",
+      });
+      return;
+    }
+    // Wherever the reader chose to act: the thread, the checkout it is pointed at and the composer
+    // the task lands in are all one server's, and picking another one moves all three.
+    const projectRef = scopeProjectRef(
+      actingEnvironmentId,
+      acting?.projectId ?? handoffSummary.projectId,
+    );
+    if (canReusePullRequestHandoffWorkspace(sourceWorkspace)) {
+      setHandoff(kind);
+      const toastId = toastManager.add({
+        type: "loading",
+        title: "Opening a new session...",
+      });
+      const opened = await newThread(projectRef, {
+        branch: sourceWorkspace.branch,
+        worktreePath: sourceWorkspace.worktreePath,
+        envMode: sourceWorkspace.worktreePath === null ? "local" : "worktree",
+        startFromOrigin: false,
+      }).then(
+        (session) => session,
+        () => null,
+      );
+      setHandoff(null);
+      if (opened === null) {
+        toastManager.update(toastId, {
+          type: "error",
+          title: "Could not open a thread",
+          description: "Try again from the project, or open a thread first.",
+        });
+        return;
+      }
+      if (task !== null) writeTaskToComposer(opened.draftId, task);
+      toastManager.update(toastId, {
+        type: "success",
+        title: "Opened in the same checkout",
+        description:
+          task === null
+            ? "The new session is on this thread's branch and worktree."
+            : "The task is in the composer — read it over, then send.",
       });
       return;
     }
@@ -1164,12 +1219,6 @@ export function PullRequestDetailPanel({
       type: "loading",
       title: "Preparing the pull request checkout...",
     });
-    // Wherever the reader chose to act: the thread, the checkout it is pointed at and the composer
-    // the task lands in are all one server's, and picking another one moves all three.
-    const projectRef = scopeProjectRef(
-      actingEnvironmentId,
-      acting?.projectId ?? handoffSummary.projectId,
-    );
     // The thread is opened before the checkout rather than after it, because the project's setup
     // script only runs for a checkout that knows which thread it is for — and a worktree with no
     // dependencies installed is not something anyone can test.

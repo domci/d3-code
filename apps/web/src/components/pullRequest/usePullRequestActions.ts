@@ -253,6 +253,23 @@ export type PullRequestHandoffDetail = Pick<
 >;
 
 /**
+ * The source session's checkout. When a Fix/Resolve "new session" starts from a thread that is
+ * already on the pull request, the new thread should keep that same branch and worktree rather
+ * than preparing another checkout (prepare can refresh or reset a reused worktree).
+ */
+export type PullRequestHandoffWorkspace = {
+  readonly branch: string | null;
+  readonly worktreePath: string | null;
+};
+
+/** True when the source session already has a checkout worth keeping for a new session. */
+export function canReusePullRequestHandoffWorkspace(
+  workspace: PullRequestHandoffWorkspace | null | undefined,
+): workspace is PullRequestHandoffWorkspace {
+  return workspace != null && (workspace.worktreePath != null || workspace.branch != null);
+}
+
+/**
  * What the last hand-off wrote into each draft, kept outside React because the panel that wrote it
  * is closed by the time the next one opens. It is how a prompt the reader has since edited is told
  * apart from the one they were handed: only the sentence still exactly as written may be replaced.
@@ -379,7 +396,8 @@ export function usePullRequestHandoffs({
 
   // Every handoff works the same way: check the pull request out into its own worktree, open a
   // thread there, and — when it carries a task — put that in the composer for the user to read
-  // before sending. Checking out is the whole point of the ones that carry nothing.
+  // before sending. Checking out is the whole point of the ones that carry nothing. The exception
+  // is a "new session" from a thread that is already on the pull request: keep that checkout.
   const startHandoff = async (
     kind: string,
     task: PullRequestThreadTask | null,
@@ -387,8 +405,45 @@ export function usePullRequestHandoffs({
     // the repository itself is what you want when the point is to run the thing where you
     // already work — and it moves the branch under everything else that is open there.
     mode: "worktree" | "local" = "worktree",
+    reuseWorkspace?: PullRequestHandoffWorkspace | null,
   ) => {
     if (!detail || handoff !== null) return;
+    const projectRef = scopeProjectRef(environmentId, detail.projectId);
+    if (canReusePullRequestHandoffWorkspace(reuseWorkspace)) {
+      setHandoff(kind);
+      const toastId = toastManager.add({
+        type: "loading",
+        title: "Opening a new session...",
+      });
+      const opened = await newThread(projectRef, {
+        branch: reuseWorkspace.branch,
+        worktreePath: reuseWorkspace.worktreePath,
+        envMode: reuseWorkspace.worktreePath === null ? "local" : "worktree",
+        startFromOrigin: false,
+      }).then(
+        (session) => session,
+        () => null,
+      );
+      setHandoff(null);
+      if (opened === null) {
+        toastManager.update(toastId, {
+          type: "error",
+          title: "Could not open a thread",
+          description: "Try again from the project, or open a thread first.",
+        });
+        return;
+      }
+      if (task !== null) writeTaskToComposer(opened.draftId, task);
+      toastManager.update(toastId, {
+        type: "success",
+        title: "Opened in the same checkout",
+        description:
+          task === null
+            ? "The new session is on this thread's branch and worktree."
+            : "The task is in the composer — read it over, then send.",
+      });
+      return;
+    }
     setHandoff(kind);
     // The menu closes on the press and takes its "Preparing..." label with it, so this is the
     // only thing answering for the checkout. It carries no timeout of its own: a loading toast
@@ -397,7 +452,6 @@ export function usePullRequestHandoffs({
       type: "loading",
       title: "Preparing the pull request checkout...",
     });
-    const projectRef = scopeProjectRef(environmentId, detail.projectId);
     // The thread is opened before the checkout rather than after it, because the project's setup
     // script only runs for a checkout that knows which thread it is for — and a worktree with no
     // dependencies installed is not something anyone can test.

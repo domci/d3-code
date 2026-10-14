@@ -824,6 +824,11 @@ export function BranchToolbarBranchSelector({
           <ThreadDetailsPrRows
             threadRef={threadRef}
             composerDraftTarget={draftId ?? threadRef}
+            sourceWorkspace={{
+              // The thread's real checkout, not the force-new-worktree composer override.
+              branch: serverThread?.branch ?? draftThread?.branch ?? null,
+              worktreePath: serverThread?.worktreePath ?? draftThread?.worktreePath ?? null,
+            }}
             links={serverThread?.pullRequests ?? []}
             currentLink={currentLinkedPr}
             onOpenLink={openPrLink}

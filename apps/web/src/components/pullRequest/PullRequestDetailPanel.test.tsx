@@ -31,7 +31,11 @@ vi.mock("~/state/session", async (original) => ({
 }));
 vi.mock("@effect/atom-react", () => ({ useAtomValue: () => [] }));
 vi.mock("~/state/server", () => ({ primaryServerKeybindingsAtom: {} }));
-vi.mock("~/state/entities", () => ({ useProjects: () => [], useServerConfigs: () => new Map() }));
+vi.mock("~/state/entities", () => ({
+  useProjects: () => [],
+  useServerConfigs: () => new Map(),
+  useThreadShell: () => null,
+}));
 vi.mock("~/state/environments", () => ({
   useEnvironments: () => ({ environments: [] }),
   usePrimaryEnvironmentId: () => EnvironmentId.make("env-1"),
