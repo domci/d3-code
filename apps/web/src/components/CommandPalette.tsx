@@ -1379,6 +1379,7 @@ function OpenCommandPaletteDialog(props: {
             contextualRefBelongsToGroup
               ? contextualProjectRef
               : scopeProjectRef(project.environmentId, project.id),
+            { resumeDraft: true },
           );
         },
       }),

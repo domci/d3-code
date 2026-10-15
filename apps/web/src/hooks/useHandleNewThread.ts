@@ -72,6 +72,7 @@ export function useNewThreadHandler() {
         envMode?: DraftThreadEnvMode;
         startFromOrigin?: boolean;
         replace?: boolean;
+        resumeDraft?: boolean;
       },
       // Which draft the thread ended up in, so a caller that has something to put in it — a
       // prepared checkout, a task to write — addresses that one rather than looking the project
@@ -182,12 +183,23 @@ export function useNewThreadHandler() {
       if (storedDraftThreadRef && reusableStoredDraftThread === null) {
         markPromotedDraftThreadByRef(storedDraftThreadRef);
       }
-      // New-thread surfaces (button, hotkeys, "/" landing, palette) only
-      // ever reuse a draft the user has NOT invested in. A draft with typed
-      // text or attachments is work in progress: it stays alive where it is
-      // (reachable from the sidebar draft rows) and this request mints a
-      // fresh draft instead — the remap in the store preserves invested
-      // drafts rather than deleting them.
+      if (
+        options?.resumeDraft &&
+        reusableStoredDraftThread &&
+        composerDraftHasUserContent(getComposerDraft(reusableStoredDraftThread.draftId))
+      ) {
+        return router
+          .navigate({
+            to: "/draft/$draftId",
+            params: { draftId: reusableStoredDraftThread.draftId },
+            replace: options.replace ?? false,
+          })
+          .then(() => ({
+            draftId: reusableStoredDraftThread.draftId,
+            threadId: reusableStoredDraftThread.threadId,
+          }));
+      }
+      // Prepared tasks need a fresh composer so they cannot overwrite unsent work.
       const emptyStoredDraftThread =
         reusableStoredDraftThread &&
         !composerDraftHasUserContent(getComposerDraft(reusableStoredDraftThread.draftId))

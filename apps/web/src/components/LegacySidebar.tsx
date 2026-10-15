@@ -2641,10 +2641,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         setOpenMobile(false);
       }
       void (async () => {
-        // No options: branch, worktree, and env mode come from the user's
-        // configured defaults, never from the currently viewed thread.
+        // Resume unsent work; fresh drafts use the configured workspace defaults.
         const result = await settlePromise(() =>
-          handleNewThread(scopeProjectRef(member.environmentId, member.id)),
+          handleNewThread(scopeProjectRef(member.environmentId, member.id), { resumeDraft: true }),
         );
         if (result._tag === "Failure") {
           const error = squashAtomCommandFailure(result);

@@ -81,8 +81,10 @@ export function useScratchProject() {
     async (environmentId: EnvironmentId) => {
       const project = await openScratchProject(environmentId);
       if (project) {
-        await handleNewThread(scopeProjectRef(project.environmentId, project.id)).catch(
-          (error: unknown) => reportScratchFailure("Could not start without a project", error),
+        await handleNewThread(scopeProjectRef(project.environmentId, project.id), {
+          resumeDraft: true,
+        }).catch((error: unknown) =>
+          reportScratchFailure("Could not start without a project", error),
         );
       }
     },

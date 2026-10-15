@@ -37,6 +37,7 @@ const testState = vi.hoisted(() => {
   };
 
   return {
+    hasUserContent: false,
     completeProjectFileRead: (value: null) => completeProjectFileRead(value),
     draftStore,
     get projectFileRead() {
@@ -52,6 +53,7 @@ const testState = vi.hoisted(() => {
         startFromOrigin: false,
       },
     ) {
+      this.hasUserContent = false;
       storedDraft = nextStoredDraft;
       targetSettings = {
         defaultThreadEnvMode: workspaceDefaults.envMode,
@@ -133,7 +135,7 @@ vi.mock("../composerDraftStore", () => {
     getState: () => testState.draftStore,
   });
   return {
-    composerDraftHasUserContent: () => false,
+    composerDraftHasUserContent: () => testState.hasUserContent,
     markPromotedDraftThreadByRef: vi.fn(),
     useComposerDraftStore,
   };
@@ -181,6 +183,43 @@ vi.mock("../uiStateStore", () => ({
 vi.mock("./useSettings", () => ({ useClientSettings: () => ({}) }));
 
 import { useNewThreadHandler } from "./useHandleNewThread";
+
+describe("resuming an unsent initial prompt", () => {
+  it.each([true, false])(
+    "only resumes an invested draft when requested (%s)",
+    async (resumeDraft) => {
+      testState.reset({
+        draftId: "draft-unsent",
+        environmentId: "environment-ssh",
+        promotedTo: null,
+        threadId: "thread-unsent",
+      });
+      testState.hasUserContent = true;
+      const openThread = useNewThreadHandler();
+      const pendingOpen = openThread(
+        { environmentId: "environment-ssh", projectId: "project-remote" } as never,
+        { resumeDraft, replace: true },
+      );
+      testState.completeProjectFileRead(null);
+      const opened = await pendingOpen;
+
+      expect(opened).toEqual(
+        resumeDraft
+          ? { draftId: "draft-unsent", threadId: "thread-unsent" }
+          : { draftId: "draft-delayed", threadId: "thread-delayed" },
+      );
+      if (resumeDraft) {
+        expect(testState.router.navigate).toHaveBeenCalledWith({
+          to: "/draft/$draftId",
+          params: { draftId: "draft-unsent" },
+          replace: true,
+        });
+        expect(testState.draftStore.setDraftThreadContext).not.toHaveBeenCalled();
+        expect(testState.draftStore.setLogicalProjectDraftThreadId).not.toHaveBeenCalled();
+      }
+    },
+  );
+});
 
 describe.each([
   ["new", null],
