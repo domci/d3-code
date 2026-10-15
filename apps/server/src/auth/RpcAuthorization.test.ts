@@ -159,6 +159,9 @@ describe("RPC authorization scopes", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.sourceControlMoveProjectBoardItem)).toBe(
       AuthSourceControlWriteScope,
     );
+    expect(requiredScopeForRpcMethod(WS_METHODS.sourceControlSetProjectBoardIssueState)).toBe(
+      AuthSourceControlWriteScope,
+    );
   });
 
   it("separates preview control from observation", () => {

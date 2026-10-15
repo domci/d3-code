@@ -2529,6 +2529,8 @@ const layerWsRpc = (
           gitHubProjectBoard.getProjectBoard(input),
         [WS_METHODS.sourceControlMoveProjectBoardItem]: (input) =>
           gitHubProjectBoard.moveItem(input),
+        [WS_METHODS.sourceControlSetProjectBoardIssueState]: (input) =>
+          gitHubProjectBoard.setIssueState(input),
         [WS_METHODS.sourceControlCloneRepository]: (input) =>
           sourceControlRepositories.cloneRepository(input),
         [WS_METHODS.projectCloneStart]: (input) =>

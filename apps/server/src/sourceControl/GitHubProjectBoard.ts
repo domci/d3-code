@@ -7,6 +7,7 @@ import * as Schema from "effect/Schema";
 import {
   ProjectBoardError,
   type MoveProjectBoardItemInput,
+  type SetProjectBoardIssueStateInput,
   type ProjectBoard,
   type ProjectBoardInput,
   type ProjectBoardItem,
@@ -19,8 +20,7 @@ import * as GitHubApi from "./GitHubApi.ts";
 import { gitHubApiHostForRemote } from "./GitHubCli.ts";
 
 /**
- * GitHub Projects (v2) boards for a repository's linked projects. Two typed operations rather
- * than a GraphQL passthrough: read the board, and move one card between Status columns.
+ * GitHub Projects (v2) boards for a repository's linked projects, with typed board actions.
  */
 export class GitHubProjectBoard extends Context.Service<
   GitHubProjectBoard,
@@ -29,6 +29,9 @@ export class GitHubProjectBoard extends Context.Service<
       input: ProjectBoardInput,
     ) => Effect.Effect<ProjectBoardResult, ProjectBoardError>;
     readonly moveItem: (input: MoveProjectBoardItemInput) => Effect.Effect<void, ProjectBoardError>;
+    readonly setIssueState: (
+      input: SetProjectBoardIssueStateInput,
+    ) => Effect.Effect<void, ProjectBoardError>;
   }
 >()("t3/sourceControl/GitHubProjectBoard") {}
 
@@ -183,6 +186,21 @@ const decodeLinkedProjects = Schema.decodeUnknownOption(
   Schema.fromJsonString(LinkedProjectsResponse),
 );
 const decodeBoard = Schema.decodeUnknownOption(Schema.fromJsonString(BoardResponse));
+const decodeIssueCard = Schema.decodeOption(
+  Schema.fromJsonString(
+    Schema.Struct({
+      data: Schema.Struct({
+        node: Schema.NullOr(
+          Schema.Struct({
+            content: Schema.optional(
+              Schema.NullOr(Schema.Struct({ id: Schema.optional(Schema.String) })),
+            ),
+          }),
+        ),
+      }),
+    }),
+  ),
+);
 
 const toItemState = (state: string | undefined) =>
   state === "OPEN" ? "open" : state === "CLOSED" ? "closed" : state === "MERGED" ? "merged" : null;
@@ -412,7 +430,34 @@ export const make = Effect.gen(function* () {
     });
   });
 
-  return GitHubProjectBoard.of({ getProjectBoard, moveItem });
+  const setIssueState = Effect.fn("GitHubProjectBoard.setIssueState")(function* (
+    input: SetProjectBoardIssueStateInput,
+  ) {
+    const operation = "setProjectBoardIssueState";
+    const repository = yield* resolveRepository(operation, input.cwd);
+    const body = yield* graphql(operation, {
+      host: repository.host,
+      query: `query($item:ID!){node(id:$item){... on ProjectV2Item{content{... on Issue{id}}}}}`,
+      variables: { item: input.itemId },
+    });
+    const decoded = decodeIssueCard(body);
+    const issueId = Option.getOrNull(decoded)?.data.node?.content?.id;
+    if (!issueId) {
+      return yield* new ProjectBoardError({
+        operation,
+        reason: "failed",
+        detail: "This board card is not an accessible GitHub issue.",
+      });
+    }
+    const mutation = input.state === "closed" ? "closeIssue" : "reopenIssue";
+    yield* graphql(operation, {
+      host: repository.host,
+      query: `mutation($issue:ID!){${mutation}(input:{issueId:$issue}){issue{id}}}`,
+      variables: { issue: issueId },
+    });
+  });
+
+  return GitHubProjectBoard.of({ getProjectBoard, moveItem, setIssueState });
 });
 
 export const layer = Layer.effect(GitHubProjectBoard, make);

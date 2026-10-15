@@ -9,6 +9,17 @@ Install Git and configure authentication on the machine running your D3 Code ser
 environment, do this on the remote machine. After signing in, open **Settings → Source Control**
 and choose **Rescan**.
 
+## GitHub board
+
+Open **Board** in the sidebar to work with GitHub Projects linked to your repositories. Select
+cards to move them together by dragging a selected card to another status, or use **Move to**.
+You can also close or reopen selected issues. Failed actions leave their cards selected for retry.
+
+**Start threads** lets you combine selected cards in one draft or create a separate draft for
+each. A combined draft uses the normal composer setup. Separate drafts share the model and
+workspace settings you choose, with one setup per environment. Each new worktree is created
+when you send its draft. Drafts remain in the sidebar until you send or discard them.
+
 ### GitHub
 
 D3 Code talks to GitHub's API directly and only needs a token. Any of these works, in this

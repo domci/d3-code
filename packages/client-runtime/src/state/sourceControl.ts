@@ -39,6 +39,14 @@ export function createSourceControlEnvironmentAtoms<R, E>(
         key: ({ environmentId }) => environmentId,
       },
     }),
+    setProjectBoardIssueState: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:source-control:set-project-board-issue-state",
+      tag: WS_METHODS.sourceControlSetProjectBoardIssueState,
+      concurrency: {
+        mode: "serial",
+        key: ({ environmentId }) => environmentId,
+      },
+    }),
     cloneRepository: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:source-control:clone-repository",
       tag: WS_METHODS.sourceControlCloneRepository,

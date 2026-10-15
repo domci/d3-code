@@ -94,6 +94,13 @@ export const MoveProjectBoardItemInput = Schema.Struct({
 });
 export type MoveProjectBoardItemInput = typeof MoveProjectBoardItemInput.Type;
 
+export const SetProjectBoardIssueStateInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  itemId: TrimmedNonEmptyString,
+  state: Schema.Literals(["open", "closed"]),
+});
+export type SetProjectBoardIssueStateInput = typeof SetProjectBoardIssueStateInput.Type;
+
 export const ProjectBoardErrorReason = Schema.Literals([
   /** The token lacks the `project` scope; running `PROJECT_BOARD_SCOPE_COMMAND` fixes it. */
   "scope_missing",

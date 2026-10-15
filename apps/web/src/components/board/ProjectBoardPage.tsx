@@ -15,7 +15,10 @@ import * as Schema from "effect/Schema";
 import { useContext, useDeferredValue, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { isElectron } from "../../env";
-import { useOpenDraftWithPrompt } from "../../hooks/useOpenDraftWithPrompt";
+import {
+  useOpenDraftWithPrompt,
+  type DraftPromptOptions,
+} from "../../hooks/useOpenDraftWithPrompt";
 import { cn } from "../../lib/utils";
 import { readLocalApi } from "../../localApi";
 import { useAllEnvironmentShellsBootstrapped, useProjects } from "../../state/entities";
@@ -29,6 +32,16 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
+import {
+  Dialog,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from "../ui/dialog";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { RefreshIcon } from "../ui/refresh-icon";
 import { SidebarInset } from "../ui/sidebar";
@@ -38,6 +51,7 @@ import { toastManager } from "../ui/toast";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../WorkspaceBreadcrumb";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
+import { BoardThreadSetup } from "./BoardThreadSetup";
 import {
   BOARD_REPOSITORIES_KEY,
   NO_BOARD_FILTERS,
@@ -61,6 +75,7 @@ export interface ProjectBoardSearch {
 }
 
 const BOARD_DRAG_TYPE = "application/x-t3-board-item";
+const cardKey = (item: BoardCardItem) => `${item.repoKey}:${item.itemId}`;
 
 const isProjectBoardError = Schema.is(ProjectBoardError);
 
@@ -165,25 +180,45 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
     rememberRepositories(keys);
   };
 
-  const canMove = useAtomValue(
+  const movePermissions = useAtomValue(
     useMemo(() => {
-      const permissions = [...new Set(repos.map((repo) => repo.project.environmentId))].map((id) =>
-        sourceControlEnvironment.moveProjectBoardItem.permissionAtom(id),
+      const permissions = repos.map((repo) => ({
+        key: repo.key,
+        atom: sourceControlEnvironment.moveProjectBoardItem.permissionAtom(
+          repo.project.environmentId,
+        ),
+      }));
+      return Atom.make(
+        (get) => new Set(permissions.filter(({ atom }) => get(atom)).map(({ key }) => key)),
       );
-      return Atom.make((get) => permissions.every((permission) => get(permission)));
     }, [repos]),
   );
   const moveItem = useAtomCommand(sourceControlEnvironment.moveProjectBoardItem, {
     reportFailure: false,
   });
   const openDraftWithPrompt = useOpenDraftWithPrompt();
+  const setIssueState = useAtomCommand(sourceControlEnvironment.setProjectBoardIssueState, {
+    reportFailure: false,
+  });
+  const issueStatePermissions = useAtomValue(
+    useMemo(() => {
+      const permissions = repos.map((repo) => ({
+        key: repo.key,
+        atom: sourceControlEnvironment.setProjectBoardIssueState.permissionAtom(
+          repo.project.environmentId,
+        ),
+      }));
+      return Atom.make(
+        (get) => new Set(permissions.filter(({ atom }) => get(atom)).map(({ key }) => key)),
+      );
+    }, [repos]),
+  );
 
   // Moves shown before GitHub has confirmed them. Each belongs to the board it was made on: once
   // a newer read arrives it is the truth, and the move is dropped with the board it annotates.
   const [moves, setMoves] = useState<
     ReadonlyMap<string, { readonly base: ProjectBoard; readonly optionId: string | null }>
   >(new Map());
-  const pendingMoves = useRef<Record<string, number>>({});
   const shown = loaded
     .filter((state) => activeKeys.has(state.repo.key))
     .map((state) => {
@@ -212,23 +247,43 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
     shown.map((entry) => ({ ...entry, items: filterBoardItems(entry.items, filters) })),
   );
 
+  const visibleItems = columns.flatMap((column) => column.items);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const selectedItems = visibleItems.filter((item) => selected.has(cardKey(item)));
+  const canMove = selectedItems.every((item) => movePermissions.has(item.repoKey));
+  const [busy, setBusy] = useState(false);
+  const actionRunning = useRef(false);
+  const [threadItems, setThreadItems] = useState<ReadonlyArray<BoardCardItem>>([]);
+  const [threadRepoKey, setThreadRepoKey] = useState("");
+  const [separateSetup, setSeparateSetup] = useState(false);
+  const toggleSelected = (item: BoardCardItem, checked: boolean) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (checked) next.add(cardKey(item));
+      else next.delete(cardKey(item));
+      return next;
+    });
+  };
+  const draggedItems = (key: string) => {
+    const card = visibleItems.find((item) => cardKey(item) === key);
+    return card === undefined ? [] : selected.has(cardKey(card)) ? selectedItems : [card];
+  };
+
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [overKey, setOverKey] = useState<string | null>(null);
   const dragged =
-    draggingId === null
-      ? undefined
-      : columns.flatMap((column) => column.items).find((item) => item.itemId === draggingId);
+    draggingId === null ? undefined : visibleItems.find((item) => cardKey(item) === draggingId);
   const dropTarget = (card: BoardCardItem | undefined, columnKey: string) => {
     const board = shown.find((entry) => entry.repoKey === card?.repoKey)?.board;
     return board === undefined ? null : resolveDropTarget(board, columnKey);
   };
   const repoOf = (key: string) => repos.find((repo) => repo.key === key);
 
-  const dropOnColumn = async (itemId: string, columnKey: string) => {
-    const card = columns.flatMap((column) => column.items).find((item) => item.itemId === itemId);
-    const repo = repoOf(card?.repoKey ?? "");
-    const board = shown.find((entry) => entry.repoKey === card?.repoKey)?.board;
-    if (card === undefined || repo === undefined || board === undefined) return;
+  const dropOnColumn = async (card: BoardCardItem, columnKey: string) => {
+    const { itemId } = card;
+    const repo = repoOf(card.repoKey);
+    const board = shown.find((entry) => entry.repoKey === card.repoKey)?.board;
+    if (repo === undefined || board === undefined) return false;
     const target = dropTarget(card, columnKey);
     if (target === null) {
       toastManager.add({
@@ -236,11 +291,10 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
         title: "Cannot move the card here",
         description: `${repo.label}'s project has no such status.`,
       });
-      return;
+      return false;
     }
-    if (card.statusOptionId === target.optionId) return;
+    if (card.statusOptionId === target.optionId) return true;
     setMoves((current) => new Map(current).set(itemId, { base: board, optionId: target.optionId }));
-    pendingMoves.current[repo.key] = (pendingMoves.current[repo.key] ?? 0) + 1;
     const result = await moveItem({
       environmentId: repo.project.environmentId,
       input: {
@@ -251,7 +305,6 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
         optionId: target.optionId,
       },
     });
-    pendingMoves.current[repo.key] = (pendingMoves.current[repo.key] ?? 1) - 1;
     if (result._tag === "Failure") {
       setMoves((current) => {
         const next = new Map(current);
@@ -265,22 +318,87 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
           description: formatEnvironmentQueryError(result.cause),
         });
       }
-      return;
+      return false;
     }
-    // Rapid drags are each shown at once; one read after the last settles confirms them all.
-    if (pendingMoves.current[repo.key] === 0) refreshRepo(repo.key);
+    return true;
   };
 
-  const startThread = async (item: BoardCardItem) => {
+  const runBatch = async (
+    items: ReadonlyArray<BoardCardItem>,
+    action: (item: BoardCardItem) => Promise<boolean>,
+    refresh = true,
+  ) => {
+    if (actionRunning.current) return;
+    actionRunning.current = true;
+    setBusy(true);
+    try {
+      for (const item of items) {
+        if (await action(item)) toggleSelected(item, false);
+      }
+    } finally {
+      if (refresh) new Set(items.map((item) => item.repoKey)).forEach(refreshRepo);
+      actionRunning.current = false;
+      setBusy(false);
+    }
+  };
+
+  const changeIssueState = async (item: BoardCardItem, state: "open" | "closed") => {
+    const repo = repoOf(item.repoKey);
+    if (!repo || !issueStatePermissions.has(repo.key)) return false;
+    const result = await setIssueState({
+      environmentId: repo.project.environmentId,
+      input: { cwd: repo.project.workspaceRoot, itemId: item.itemId, state },
+    });
+    if (result._tag === "Failure") {
+      if (!isAtomCommandInterrupted(result))
+        toastManager.add({
+          type: "error",
+          title: `Could not ${state === "closed" ? "close" : "reopen"} ${item.title}`,
+          description: formatEnvironmentQueryError(result.cause),
+        });
+      return false;
+    }
+    return true;
+  };
+
+  const startThread = async (item: BoardCardItem, options?: DraftPromptOptions) => {
     const repo = repoOf(item.repoKey);
     if (repo === undefined) return;
     const opened = await openDraftWithPrompt(
       scopeProjectRef(repo.project.environmentId, repo.project.id),
       startThreadPrompt(item),
+      options,
     );
     if (!opened) {
       toastManager.add({ type: "error", title: "Could not open a new thread" });
     }
+    return opened;
+  };
+
+  const startSelectedThreads = async (options?: ReadonlyMap<EnvironmentId, DraftPromptOptions>) => {
+    const items = threadItems;
+    const repo = repoOf(threadRepoKey);
+    if (actionRunning.current || items.length === 0 || repo === undefined) return;
+    setThreadItems([]);
+    await runBatch(
+      options ? items : items.slice(0, 1),
+      async (item) => {
+        if (options) {
+          const itemRepo = repoOf(item.repoKey);
+          return itemRepo
+            ? ((await startThread(item, options.get(itemRepo.project.environmentId))) ?? false)
+            : false;
+        }
+        const opened = await openDraftWithPrompt(
+          scopeProjectRef(repo.project.environmentId, repo.project.id),
+          items.map(startThreadPrompt).join("\n\n"),
+        );
+        if (opened) items.forEach((entry) => toggleSelected(entry, false));
+        else toastManager.add({ type: "error", title: "Could not open a new thread" });
+        return opened;
+      },
+      false,
+    );
   };
 
   let body: ReactNode;
@@ -314,6 +432,91 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
     body = (
       <div className="flex min-h-0 flex-col gap-3">
         {failures.length === 0 ? null : <BoardError failures={failures} />}
+        <div className="flex flex-wrap items-center gap-2" aria-label="Board selection">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || visibleItems.length === 0}
+            onClick={() => setSelected(new Set(visibleItems.map(cardKey)))}
+          >
+            Select all visible
+          </Button>
+          {selectedItems.length === 0 ? null : (
+            <>
+              <span className="text-sm text-muted-foreground" role="status">
+                {selectedItems.length} selected
+              </span>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => setSelected(new Set())}
+              >
+                Clear selection
+              </Button>
+              <BoardSelect
+                label="Move to"
+                value=""
+                disabled={!canMove || busy}
+                onChange={(key) => {
+                  if (key) void runBatch(selectedItems, (item) => dropOnColumn(item, key));
+                }}
+              >
+                <option value="">Choose status</option>
+                {columns
+                  .filter((column) =>
+                    selectedItems.every((item) => dropTarget(item, column.key) !== null),
+                  )
+                  .map((column) => (
+                    <option key={column.key} value={column.key}>
+                      {column.name}
+                    </option>
+                  ))}
+              </BoardSelect>
+              {(["closed", "open"] as const).map((state) => {
+                const eligible = selectedItems.filter(
+                  (item) => item.kind === "issue" && item.state !== state,
+                );
+                return (
+                  <Button
+                    key={state}
+                    size="sm"
+                    variant="outline"
+                    disabled={
+                      busy ||
+                      eligible.length === 0 ||
+                      eligible.some((item) => !issueStatePermissions.has(item.repoKey))
+                    }
+                    onClick={() => void runBatch(eligible, (item) => changeIssueState(item, state))}
+                  >
+                    {state === "closed" ? "Close" : "Reopen"} issues ({eligible.length})
+                  </Button>
+                );
+              })}
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => {
+                  if (selectedItems.length === 1) {
+                    void runBatch(
+                      selectedItems,
+                      async (item) => (await startThread(item)) ?? false,
+                      false,
+                    );
+                    return;
+                  }
+                  setThreadRepoKey(selectedItems[0]!.repoKey);
+                  setSeparateSetup(false);
+                  setThreadItems(selectedItems);
+                }}
+              >
+                Start thread{selectedItems.length > 1 ? "s" : ""}
+              </Button>
+            </>
+          )}
+          {busy ? <Spinner className="size-4" /> : null}
+        </div>
         {shown
           .filter((entry) => entry.board.truncated)
           .map((entry) => (
@@ -327,10 +530,18 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
               key={column.key}
               column={column}
               repos={repos}
-              canDrag={canMove}
-              droppable={dragged !== undefined && dropTarget(dragged, column.key) !== null}
+              canDrag={!busy}
+              movePermissions={movePermissions}
+              droppable={
+                dragged !== undefined &&
+                draggedItems(cardKey(dragged)).every(
+                  (item) =>
+                    movePermissions.has(item.repoKey) && dropTarget(item, column.key) !== null,
+                )
+              }
               over={overKey === column.key}
               draggingId={draggingId}
+              draggingSelection={dragged !== undefined && selected.has(cardKey(dragged))}
               onDragStart={setDraggingId}
               onDragOver={setOverKey}
               onDragEnd={() => {
@@ -340,9 +551,12 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
               onDrop={(itemId) => {
                 setDraggingId(null);
                 setOverKey(null);
-                void dropOnColumn(itemId, column.key);
+                void runBatch(draggedItems(itemId), (item) => dropOnColumn(item, column.key));
               }}
               onStartThread={(item) => void startThread(item)}
+              selected={selected}
+              busy={busy}
+              onSelect={toggleSelected}
             />
           ))}
         </div>
@@ -352,6 +566,56 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none isolate">
+      <Dialog
+        open={threadItems.length > 0}
+        onOpenChange={(open) => {
+          if (!open) setThreadItems([]);
+        }}
+      >
+        <DialogPopup>
+          <DialogHeader>
+            <DialogTitle>Start threads for {threadItems.length} cards</DialogTitle>
+            <DialogDescription>
+              {separateSetup
+                ? "Choose the model and workspace once for all drafts in each environment. New worktrees are created separately when you send each thread."
+                : "Combine the cards in one thread, or open a separate draft for each."}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel>
+            {!separateSetup && new Set(threadItems.map((item) => item.repoKey)).size > 1 ? (
+              <BoardSelect
+                label="Project for combined thread"
+                value={threadRepoKey}
+                onChange={setThreadRepoKey}
+              >
+                {repos
+                  .filter((repo) => threadItems.some((item) => item.repoKey === repo.key))
+                  .map((repo) => (
+                    <option key={repo.key} value={repo.key}>
+                      {repo.label}
+                    </option>
+                  ))}
+              </BoardSelect>
+            ) : null}
+            {separateSetup ? (
+              <BoardThreadSetup
+                projects={repos
+                  .filter((repo) => threadItems.some((item) => item.repoKey === repo.key))
+                  .map((repo) => repo.project)}
+                onCreate={(options) => void startSelectedThreads(options)}
+              />
+            ) : null}
+          </DialogPanel>
+          {separateSetup ? null : (
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setSeparateSetup(true)}>
+                Separate threads
+              </Button>
+              <Button onClick={() => void startSelectedThreads()}>One thread</Button>
+            </DialogFooter>
+          )}
+        </DialogPopup>
+      </Dialog>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
         <WorkspacePageHeader electron={isElectron} className="h-auto">
           <div className="flex w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-2 py-2">
@@ -532,11 +796,13 @@ function BoardSelect(props: {
   readonly value: string;
   readonly onChange: (value: string) => void;
   readonly children: ReactNode;
+  readonly disabled?: boolean;
 }) {
   return (
     <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
       <span>{props.label}</span>
       <select
+        disabled={props.disabled}
         value={props.value}
         onChange={(event) => props.onChange(event.target.value)}
         className="h-8 max-w-48 rounded-md border border-input bg-background px-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -551,15 +817,20 @@ function BoardColumn(props: {
   readonly column: BoardColumnView;
   readonly repos: ReadonlyArray<Repository>;
   readonly canDrag: boolean;
+  readonly movePermissions: ReadonlySet<string>;
   /** The card being dragged can take this column's status. */
   readonly droppable: boolean;
   readonly over: boolean;
   readonly draggingId: string | null;
+  readonly draggingSelection: boolean;
   readonly onDragStart: (itemId: string) => void;
   readonly onDragOver: (columnKey: string) => void;
   readonly onDragEnd: () => void;
   readonly onDrop: (itemId: string) => void;
   readonly onStartThread: (item: BoardCardItem) => void;
+  readonly selected: ReadonlySet<string>;
+  readonly busy: boolean;
+  readonly onSelect: (item: BoardCardItem, checked: boolean) => void;
 }) {
   const { column } = props;
   return (
@@ -576,7 +847,7 @@ function BoardColumn(props: {
         props.onDragOver(column.key);
       }}
       onDrop={(event) => {
-        if (!props.canDrag) return;
+        if (!props.canDrag || !props.droppable) return;
         event.preventDefault();
         const itemId = event.dataTransfer.getData(BOARD_DRAG_TYPE);
         if (itemId !== "") props.onDrop(itemId);
@@ -600,11 +871,18 @@ function BoardColumn(props: {
             key={item.itemId}
             item={item}
             repo={props.repos.find((repo) => repo.key === item.repoKey)}
-            draggable={props.canDrag}
-            dimmed={props.draggingId === item.itemId}
+            draggable={props.canDrag && props.movePermissions.has(item.repoKey)}
+            dimmed={
+              props.draggingId !== null &&
+              (props.draggingId === cardKey(item) ||
+                (props.draggingSelection && props.selected.has(cardKey(item))))
+            }
             onDragStart={props.onDragStart}
             onDragEnd={props.onDragEnd}
             onStartThread={props.onStartThread}
+            selected={props.selected.has(cardKey(item))}
+            busy={props.busy}
+            onSelect={props.onSelect}
           />
         ))}
       </ul>
@@ -620,6 +898,9 @@ function BoardCard(props: {
   readonly onDragStart: (itemId: string) => void;
   readonly onDragEnd: () => void;
   readonly onStartThread: (item: BoardCardItem) => void;
+  readonly selected: boolean;
+  readonly busy: boolean;
+  readonly onSelect: (item: BoardCardItem, checked: boolean) => void;
 }) {
   const { item, repo } = props;
   const url = item.url;
@@ -638,11 +919,12 @@ function BoardCard(props: {
         "flex flex-col gap-2 rounded-md border border-l-4 border-border bg-card p-2.5 text-sm text-card-foreground",
         repo === undefined ? undefined : repositoryAccent(repo.label).border,
         props.dimmed && "opacity-50",
+        props.selected && "ring-2 ring-primary",
       )}
       onDragStart={(event) => {
-        event.dataTransfer.setData(BOARD_DRAG_TYPE, item.itemId);
+        event.dataTransfer.setData(BOARD_DRAG_TYPE, cardKey(item));
         event.dataTransfer.effectAllowed = "move";
-        props.onDragStart(item.itemId);
+        props.onDragStart(cardKey(item));
       }}
       onDragEnd={props.onDragEnd}
     >
@@ -653,6 +935,12 @@ function BoardCard(props: {
         </div>
       )}
       <div className="flex items-start gap-2">
+        <Checkbox
+          aria-label={`Select ${item.title}`}
+          checked={props.selected}
+          disabled={props.busy}
+          onCheckedChange={(checked) => props.onSelect(item, checked)}
+        />
         {item.number === null ? null : (
           <span className="shrink-0 tabular-nums text-xs text-muted-foreground">
             #{item.number}
@@ -698,7 +986,12 @@ function BoardCard(props: {
             </span>
           ))}
         </div>
-        <Button size="xs" variant="outline" onClick={() => props.onStartThread(item)}>
+        <Button
+          size="xs"
+          variant="outline"
+          disabled={props.busy}
+          onClick={() => props.onStartThread(item)}
+        >
           Start thread
         </Button>
       </div>

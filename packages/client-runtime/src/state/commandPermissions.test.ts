@@ -58,6 +58,38 @@ const setup = Effect.gen(function* () {
 });
 
 describe("command permissions", () => {
+  it.effect(
+    "checks issue state writes against the destination's current source-control grant",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const registry = yield* setup;
+          const issueState = createCommandPermissions(
+            runtime,
+            WS_METHODS.sourceControlSetProjectBoardIssueState,
+          );
+          registry.set(
+            sessions(env),
+            AsyncResult.success({
+              ...grant(false),
+              scopes: [AuthSourceControlWriteScope],
+              permissions: [AuthSourceControlWriteScope],
+            }),
+          );
+          registry.set(sessions(other), AsyncResult.success(grant(true)));
+          expect(registry.get(issueState.permissionAtom(env))).toBe(true);
+          yield* issueState.authorize(registry, env);
+          expect(registry.get(issueState.permissionAtom(other))).toBe(false);
+          expect(
+            (yield* issueState.authorize(registry, other).pipe(Effect.flip)).requiredPermission,
+          ).toBe(AuthSourceControlWriteScope);
+          registry.set(sessions(env), AsyncResult.success(grant(false)));
+          expect(
+            (yield* issueState.authorize(registry, env).pipe(Effect.flip)).requiredPermission,
+          ).toBe(AuthSourceControlWriteScope);
+        }),
+      ),
+  );
   it.effect("uses the target grant for both availability and execution", () =>
     Effect.scoped(
       Effect.gen(function* () {

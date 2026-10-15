@@ -235,6 +235,70 @@ const page = (start: number, more: boolean) =>
 const endlessPage = page(0, true);
 
 describe("GitHubProjectBoard", () => {
+  it.effect("closes and reopens the issue behind a board card", () => {
+    const { calls, layer } = makeService((call) =>
+      Effect.succeed(
+        call.variables?.item
+          ? JSON.stringify({ data: { node: { content: { id: "ISSUE_12" } } } })
+          : '{"data":{}}',
+      ),
+    );
+    return Effect.gen(function* () {
+      const board = yield* GitHubProjectBoard.GitHubProjectBoard;
+      yield* board.setIssueState({ cwd: "/work/web", itemId: "PVTI_1", state: "closed" });
+      yield* board.setIssueState({ cwd: "/work/web", itemId: "PVTI_1", state: "open" });
+      assert.deepStrictEqual(
+        calls.map((call) => call.variables),
+        [{ item: "PVTI_1" }, { issue: "ISSUE_12" }, { item: "PVTI_1" }, { issue: "ISSUE_12" }],
+      );
+      assert.include(calls[1]?.query ?? "", "closeIssue(");
+      assert.include(calls[3]?.query ?? "", "reopenIssue(");
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect(
+    "refuses a draft, pull request, missing card or unreadable issue before writing",
+    () => {
+      return Effect.gen(function* () {
+        for (const node of [null, {}, { content: null }, { content: {} }]) {
+          const { calls, layer } = makeService(() =>
+            Effect.succeed(JSON.stringify({ data: { node } })),
+          );
+          const error = yield* Effect.gen(function* () {
+            const board = yield* GitHubProjectBoard.GitHubProjectBoard;
+            return yield* Effect.flip(
+              board.setIssueState({ cwd: "/work/web", itemId: "PVTI_1", state: "closed" }),
+            );
+          }).pipe(Effect.provide(layer));
+          assert.strictEqual(error.reason, "failed");
+          assert.strictEqual(calls.length, 1);
+        }
+      });
+    },
+  );
+
+  it.effect("preserves a failed issue write as an error", () => {
+    const { layer } = makeService((call) =>
+      call.variables?.item
+        ? Effect.succeed(JSON.stringify({ data: { node: { content: { id: "ISSUE_12" } } } }))
+        : Effect.fail(
+            new GitHubApi.GitHubApiResponseError({
+              host: "github.com",
+              operation: "setProjectBoardIssueState",
+              status: 403,
+            }),
+          ),
+    );
+    return Effect.gen(function* () {
+      const board = yield* GitHubProjectBoard.GitHubProjectBoard;
+      const error = yield* Effect.flip(
+        board.setIssueState({ cwd: "/work/web", itemId: "PVTI_1", state: "closed" }),
+      );
+      assert.strictEqual(error.reason, "failed");
+      assert.instanceOf(error.cause, GitHubApi.GitHubApiResponseError);
+    }).pipe(Effect.provide(layer));
+  });
+
   it.effect("reads the linked projects, then the chosen project's board", () => {
     const { calls, layer } = makeService((call) =>
       Effect.succeed(call.query.includes("projectsV2") ? LINKED_BODY : BOARD_BODY),

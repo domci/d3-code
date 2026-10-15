@@ -345,6 +345,7 @@ import { VcsError } from "./vcs.ts";
 import { Project, ProjectMutation, ProjectMutationError } from "./project.ts";
 import {
   MoveProjectBoardItemInput,
+  SetProjectBoardIssueStateInput,
   ProjectBoardError,
   ProjectBoardInput,
   ProjectBoardResult,
@@ -535,6 +536,7 @@ export const WS_METHODS = {
   sourceControlPublishRepository: "sourceControl.publishRepository",
   sourceControlGetProjectBoard: "sourceControl.getProjectBoard",
   sourceControlMoveProjectBoardItem: "sourceControl.moveProjectBoardItem",
+  sourceControlSetProjectBoardIssueState: "sourceControl.setProjectBoardIssueState",
   projectCloneStart: "projectClone.start",
   projectCloneCancel: "projectClone.cancel",
   projectCloneRetry: "projectClone.retry",
@@ -1120,6 +1122,15 @@ const WsSourceControlCloneRepositoryRpc = Rpc.make(WS_METHODS.sourceControlClone
   success: SourceControlCloneRepositoryResult,
   error: Schema.Union([SourceControlRepositoryError, EnvironmentAuthorizationError]),
 });
+
+const WsSourceControlSetProjectBoardIssueStateRpc = Rpc.make(
+  WS_METHODS.sourceControlSetProjectBoardIssueState,
+  {
+    payload: SetProjectBoardIssueStateInput,
+    success: Schema.Void,
+    error: Schema.Union([ProjectBoardError, EnvironmentAuthorizationError]),
+  },
+);
 
 // Clone-backed project creation. `start` returns once the project exists and
 // the clone is running; progress arrives on the subscription.
@@ -1869,6 +1880,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSourceControlLookupRepositoryRpc,
   WsSourceControlGetProjectBoardRpc,
   WsSourceControlMoveProjectBoardItemRpc,
+  WsSourceControlSetProjectBoardIssueStateRpc,
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,
   WsProjectCloneStartRpc,
