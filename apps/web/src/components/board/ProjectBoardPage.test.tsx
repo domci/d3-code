@@ -163,18 +163,25 @@ afterEach(async () => {
 });
 
 describe("board batch actions", () => {
-  it("moves the selection when dragging a selected card, and refreshes once", async () => {
+  it("moves the selection even when the browser does not return the custom drag payload", async () => {
     await selectBoth();
-    const data = new Map<string, string>();
     await act(async () => {
       view.root.findAllByType("li")[0]!.props.onDragStart({
-        dataTransfer: { setData: (key: string, value: string) => data.set(key, value) },
+        dataTransfer: { setData() {} },
       });
     });
+    const acceptDrop = vi.fn();
+    await act(async () => {
+      view.root.findByProps({ "aria-label": "Done" }).props.onDragOver({
+        preventDefault: acceptDrop,
+        dataTransfer: {},
+      });
+    });
+    expect(acceptDrop).toHaveBeenCalledOnce();
     await act(async () => {
       view.root.findByProps({ "aria-label": "Done" }).props.onDrop({
         preventDefault() {},
-        dataTransfer: { getData: (key: string) => data.get(key) },
+        dataTransfer: { getData: () => "" },
       });
     });
     expect(state.move.mock.calls.map(([call]) => [call.input.itemId, call.input.optionId])).toEqual(
@@ -186,6 +193,20 @@ describe("board batch actions", () => {
     expect(checkbox("First").props.checked).toBe(false);
     expect(checkbox("Second").props.checked).toBe(false);
     expect(state.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("moves only the dragged card when it is outside the selection", async () => {
+    await act(async () => {
+      checkbox("First").props.onCheckedChange(true);
+    });
+    await act(async () => {
+      view.root.findAllByType("li")[1]!.props.onDragStart({ dataTransfer: { setData() {} } });
+    });
+    await act(async () => {
+      view.root.findByProps({ "aria-label": "Done" }).props.onDrop({ preventDefault() {} });
+    });
+    expect(state.move.mock.calls.map(([call]) => call.input.itemId)).toEqual(["1"]);
+    expect(checkbox("First").props.checked).toBe(true);
   });
 
   it("keeps a failed issue selected while finishing the rest of the close batch", async () => {

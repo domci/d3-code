@@ -430,7 +430,7 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
     );
   } else {
     body = (
-      <div className="flex min-h-0 flex-col gap-3">
+      <div className="flex min-h-full flex-col gap-3">
         {failures.length === 0 ? null : <BoardError failures={failures} />}
         <div className="flex flex-wrap items-center gap-2" aria-label="Board selection">
           <Button
@@ -524,7 +524,7 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
               Showing the first 1,000 items of {repoOf(entry.repoKey)?.label}&apos;s project.
             </p>
           ))}
-        <div className="flex items-start gap-3 overflow-x-auto pb-2">
+        <div className="flex min-h-80 flex-1 items-stretch gap-3 overflow-x-auto pb-2">
           {columns.map((column) => (
             <BoardColumn
               key={column.key}
@@ -847,10 +847,9 @@ function BoardColumn(props: {
         props.onDragOver(column.key);
       }}
       onDrop={(event) => {
-        if (!props.canDrag || !props.droppable) return;
+        if (!props.canDrag || !props.droppable || props.draggingId === null) return;
         event.preventDefault();
-        const itemId = event.dataTransfer.getData(BOARD_DRAG_TYPE);
-        if (itemId !== "") props.onDrop(itemId);
+        props.onDrop(props.draggingId);
       }}
     >
       <header className="flex items-center gap-2 px-1 text-sm font-medium">
