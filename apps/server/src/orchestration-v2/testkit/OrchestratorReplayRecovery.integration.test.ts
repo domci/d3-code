@@ -24,7 +24,7 @@ import {
   makeCursorAgentSdkReplayRunner,
 } from "../Adapters/CursorAdapterV2.testkit.ts";
 import * as CursorAdapterV2Testkit from "../Adapters/CursorAdapterV2.testkit.ts";
-import * as IdAllocator from "../IdAllocator.ts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import { provideDeterministicTestRuntime } from "./DeterministicRuntime.ts";
 import {
@@ -48,12 +48,12 @@ import {
 } from "./fixtures/shared.ts";
 import type { OrchestratorV2ScenarioResult } from "./OrchestratorScenario.ts";
 import { runOrchestratorV2ProviderReplayScenario } from "./ProviderReplayHarness.ts";
-import { checkpointWorkspace } from "./ReplayFixtureWorkspace.ts";
+import { checkpointWorkspace } from "@t3tools/provider-testing/replayWorkspace";
+import { materializeReplayTranscriptRuntimeInstructions } from "./ReplayRuntimeInstructions.ts";
 import {
-  materializeReplayTranscriptRuntimeInstructions,
   materializeReplayTranscriptWorkspace,
   readProviderReplayTranscript,
-} from "./ReplayTranscriptNdjson.ts";
+} from "@t3tools/provider-testing/replayTranscript";
 
 const FIRST_FINAL = "provider thread resume fixture first turn complete";
 const SECOND_FINAL = "provider thread resume fixture second turn complete";
@@ -377,8 +377,6 @@ describe("orchestrator replay recovery", () => {
   it.effect("keeps a Claude subagent resumed after a server restart in its own thread", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        // The math.ts subagent from thread 42e302f0 (2026-09-25): launched,
-        // finished, then resumed by SendMessage after the server restarted.
         const transcript = yield* readClaudeSubagentResumeTranscript();
         const [launchPrompt, resumePrompt] = yield* decodePromptPair(transcript.metadata?.prompts);
         const workspace = yield* checkpointWorkspace(transcript.scenario);
@@ -449,6 +447,11 @@ describe("orchestrator replay recovery", () => {
         assert.lengthOf(childThreads, 1);
         const child = childThreads[0];
         assert.equal(child?.thread.id, subagent?.childThreadId);
+        assert.deepEqual(child?.thread.modelSelection, {
+          instanceId: CLAUDE_MODEL_SELECTION.instanceId,
+          model: "claude-sonnet-5",
+          options: [{ id: "effort", value: "high" }],
+        });
 
         const conversation = (child?.turnItems ?? [])
           .toSorted((left, right) => left.ordinal - right.ordinal)
@@ -466,7 +469,6 @@ describe("orchestrator replay recovery", () => {
         assert.include(conversation[1], "is 1 line long");
         assert.include(conversation[2], "Look again at");
         assert.include(conversation[3], "Bug/edge case found and fixed");
-        // The resumed run's own tool calls land in the child thread too.
         const childCommands = (child?.turnItems ?? []).filter(
           (item) => item.type === "command_execution",
         );

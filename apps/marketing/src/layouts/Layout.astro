@@ -115,7 +115,7 @@ const canonicalUrl = new URL(Astro.url.pathname, Astro.site);
               loading="lazy"
               decoding="async"
             />
-            <span>&copy; {new Date().getFullYear()} T3 Tools Inc · MIT licensed</span>
+            <span>&copy; {new Date().getFullYear()} D3 Tools Inc · MIT licensed</span>
           </div>
           <div class="footer-links">
             <a href={GITHUB_REPOSITORY_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
@@ -364,7 +364,8 @@ const canonicalUrl = new URL(Astro.url.pathname, Astro.site);
 
   .nav-brand {
     display: inline-flex;
-    align-items: center;
+    align-items: baseline;
+    gap: 4px;
     color: var(--fg);
     transition: color 0.2s ease;
   }
@@ -373,11 +374,18 @@ const canonicalUrl = new URL(Astro.url.pathname, Astro.site);
     color: #fff;
   }
 
+  .nav-brand-mark {
+    height: 1cap;
+    width: auto;
+    flex: none;
+  }
+
   .nav-brand-name {
     font-size: 16px;
-    font-weight: 650;
+    font-weight: 500;
     letter-spacing: -0.025em;
     line-height: 1;
+    color: var(--fg-muted);
   }
 
   .nav-right {

@@ -15,15 +15,15 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import * as ContextHandoffService from "./ContextHandoffService.ts";
-import * as IdAllocator from "./IdAllocator.ts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import {
   historicalMessage,
   historyCost,
   historyResponseItems,
   renderHistory,
-} from "./ContextHandoffBudget.ts";
+} from "@t3tools/provider-core/server/handoffBudget";
 import { deliverContextHandoffs } from "./ContextHandoffDelivery.ts";
-import type { ProviderAdapterV2HistoricalContext } from "./ProviderAdapter.ts";
+import type { ProviderAdapterV2HistoricalContext } from "@t3tools/provider-core/server/ProviderAdapter";
 
 const layerTest = ContextHandoffService.layer.pipe(Layer.provide(IdAllocator.layer));
 const now = DateTime.makeUnsafe("2026-01-01T00:00:00.000Z");

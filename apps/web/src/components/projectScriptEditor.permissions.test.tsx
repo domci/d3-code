@@ -64,6 +64,7 @@ const request: ProjectScriptEditorRequest = {
     icon: "test",
     runOnWorktreeCreate: false,
     waitForSetup: false,
+    runOnSettle: false,
     keybinding: "mod+k",
     previewUrl: null,
     autoOpenPreview: false,
@@ -254,7 +255,6 @@ describe("ProjectScriptEditorDialog", () => {
       });
       const root = await openEditor(onSubmit);
 
-      // A second client changes the shortcut after this dialog snapshots it.
       persisted.keybinding = "mod+j";
       await act(() => {
         root.findByProps({ id: "script-name" }).props.onChange({ target: { value: "Renamed" } });

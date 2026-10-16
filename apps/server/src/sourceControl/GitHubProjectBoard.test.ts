@@ -6,7 +6,13 @@ import * as Option from "effect/Option";
 import { type RepositoryIdentity } from "@t3tools/contracts";
 
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
-import * as GitHubApi from "./GitHubApi.ts";
+import * as GitHubApi from "@t3tools/source-control-github/server/GitHubRequestPolicy";
+import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
+import * as GitHubCredentials from "@t3tools/source-control-github/server/GitHubCredentials";
+import * as GitHubQuota from "@t3tools/source-control-github/server/GitHubQuota";
+import * as SourceControlRateLimit from "@t3tools/source-control-core/server/SourceControlRateLimit";
+import { HttpClient, HttpClientResponse } from "effect/http";
+import * as Redacted from "effect/Redacted";
 import * as GitHubProjectBoard from "./GitHubProjectBoard.ts";
 
 const BOARD_BODY = JSON.stringify({
@@ -184,22 +190,56 @@ function makeService(
   answer: (call: RecordedCall) => Effect.Effect<string, GitHubApi.GitHubApiError>,
 ) {
   const calls: RecordedCall[] = [];
-  const api = Layer.succeed(
-    GitHubApi.GitHubApi,
-    GitHubApi.GitHubApi.of({
-      graphql: (input) => {
-        const call = {
-          host: input.host,
-          query: input.query,
-          variables: input.variables,
-          allowReserve: input.allowReserve,
-        };
-        calls.push(call);
-        return answer(call);
-      },
-      rest: () => Effect.die("unexpected REST call"),
-      credential: () => Effect.die("unexpected credential read"),
-    }),
+  const api = GitHubRest.layer.pipe(
+    Layer.provideMerge(
+      Layer.mergeAll(
+        Layer.succeed(GitHubCredentials.GitHubCredentials, {
+          get: (host) =>
+            Effect.succeed({
+              host,
+              token: Redacted.make("test"),
+              source: "gh" as const,
+              fingerprint: "test",
+            }),
+          invalidate: () => Effect.void,
+        }),
+        GitHubQuota.layer,
+        SourceControlRateLimit.layer,
+        Layer.succeed(
+          HttpClient.HttpClient,
+          HttpClient.make((request) => {
+            const body = request.body;
+            if (body._tag !== "Uint8Array") return Effect.die("Expected a JSON GraphQL request");
+            const decoded: { query: string; variables: Record<string, unknown> } = JSON.parse(
+              new TextDecoder().decode(body.body),
+            );
+            const call = {
+              host: new URL(request.url).host.replace(/^api\./, ""),
+              query: decoded.query,
+              variables: decoded.variables,
+              allowReserve: true,
+            };
+            calls.push(call);
+            return answer(call).pipe(
+              Effect.match({
+                onSuccess: (body) =>
+                  HttpClientResponse.fromWeb(
+                    request,
+                    new Response(body, { headers: { "content-type": "application/json" } }),
+                  ),
+                onFailure: (error) =>
+                  HttpClientResponse.fromWeb(
+                    request,
+                    new Response(JSON.stringify({ errors: [{ message: error.message }] }), {
+                      headers: { "content-type": "application/json" },
+                    }),
+                  ),
+              }),
+            );
+          }),
+        ),
+      ),
+    ),
   );
   const identities = Layer.succeed(
     RepositoryIdentityResolver.RepositoryIdentityResolver,

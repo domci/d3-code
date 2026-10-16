@@ -636,7 +636,7 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
                   onKeyDown={(event) => {
                     if (event.key === "Escape") setCardSearch("");
                   }}
-                  className="h-8 w-48 rounded-md border border-input bg-background px-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="h-8 w-48 rounded-md border border-input bg-background px-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                 />
                 {cardSearch === "" ? null : (
                   <>
@@ -805,7 +805,7 @@ function BoardSelect(props: {
         disabled={props.disabled}
         value={props.value}
         onChange={(event) => props.onChange(event.target.value)}
-        className="h-8 max-w-48 rounded-md border border-input bg-background px-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="h-8 max-w-48 rounded-md border border-input bg-background px-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
         {props.children}
       </select>

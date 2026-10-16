@@ -1,21 +1,5 @@
 import { ThreadDetailsControl } from "./ThreadDetailsControl";
 import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
-/**
- * The thread details panel's pull request row: what the thread's pull request is, and the one
- * thing worth doing to it right now.
- *
- * The row itself opens the pull request in the right panel, exactly as it always has. Once the
- * host answers, the title gets the full first line and a second line carries the number, checks,
- * watch, and a single action slot, ranked by what unblocks the merge next: "Resolve" on
- * conflicts, "Ready" on a draft, "Fix" under failing checks, and "Merge" only once the branch is
- * clean and its checks pass. While checks run the slot reports
- * that instead — a merge offered mid-run would race the very runs that gate it. Everything else
- * the host knows (title, state, checks tally, diff size) lives in the row's tooltip, so a hover
- * answers what previously took opening the panel.
- *
- * Until the detail arrives — or where pull requests are not supported at all — the row renders
- * from the linked snapshot or branch summary, or just the link when status is unavailable.
- */
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import type { EnvironmentId, ProjectId, PullRequestRef, ScopedThreadRef } from "@t3tools/contracts";
 import { sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
@@ -80,7 +64,8 @@ import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   THREAD_DETAILS_PANEL_ICON_CLASS,
-  THREAD_DETAILS_PANEL_LINK_SPLIT_GROUP_CLASS,
+  THREAD_DETAILS_PANEL_LABEL_CLASS,
+  THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS,
   THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS,
 } from "./threadDetailsPanelStyles";
 
@@ -104,14 +89,11 @@ export function ThreadDetailsPrRow({
   number: number;
   reference?: Pick<PullRequestRef, "host" | "repository" | "number"> | null;
   status: PrStatusIndicator | null;
-  /** The thread's project, which is what the pull request is read through on the host. */
   project: EnvironmentProject | null;
   label: string;
   openAriaLabel: string;
   onOpen: (event: ReactMouseEvent<HTMLElement>) => void;
-  /** An action changed the pull request on the host, so the vcs status behind the row is stale. */
   onActed?: () => void;
-  /** Set while the server watches this pull request for the thread; stops the watch. */
   onStopWatching?: (() => void) | undefined;
   /** The viewed thread's composer, which "Fix in this session" writes the task into. */
   composerDraftTarget?: ScopedThreadRef | DraftId | undefined;
@@ -241,7 +223,6 @@ export function ThreadDetailsPrRow({
     void startHandoff("findings", task, "worktree", sourceWorkspace);
   };
 
-  // Host details distinguish drafts; all panels share the same PR-state glyph.
   const statePresentation =
     detail === null
       ? null
@@ -263,9 +244,6 @@ export function ThreadDetailsPrRow({
     <PullRequestGlyph.pullRequest className={THREAD_DETAILS_PANEL_ICON_CLASS} />
   );
 
-  // Everything the host reported, at a glance. The rows stay short; the tooltip is where the
-  // rest of the answer lives — styled like the sidebar's thread tooltip, title above icon-led
-  // detail rows, so the two read as one family.
   const rowTooltip =
     detail === null || statePresentation === null ? (
       <TooltipPopup side="top">{status?.tooltip ?? `Pull request #${number}`}</TooltipPopup>
@@ -380,7 +358,6 @@ export function ThreadDetailsPrRow({
               }
             : null;
 
-  // The server ends a watch when the pull request closes, so only an open one shows the eye.
   const watching =
     onStopWatching !== undefined && (detail?.state ?? pr?.state ?? "open") === "open";
   const watchControl = (part: "secondary" | "icon") =>
@@ -418,7 +395,7 @@ export function ThreadDetailsPrRow({
       </Tooltip>
     ) : null;
 
-  const openRow = (text: string, part: "row" | "link-primary") => (
+  const openRow = (text: string, part: "row" | "primary") => (
     <Tooltip>
       <TooltipTrigger
         render={
@@ -429,11 +406,14 @@ export function ThreadDetailsPrRow({
             part={part}
             aria-label={openAriaLabel}
             onClick={onOpen}
+            onAuxClick={onOpen}
           />
         }
       >
         {icon}
-        <span className="min-w-0 flex-1 truncate text-left">{text}</span>
+        <span className={cn("min-w-0 flex-1 truncate text-left", THREAD_DETAILS_PANEL_LABEL_CLASS)}>
+          {text}
+        </span>
       </TooltipTrigger>
       {rowTooltip}
     </Tooltip>
@@ -444,9 +424,6 @@ export function ThreadDetailsPrRow({
   return (
     <>
       {detail !== null && (showChecks || trailingAction !== null || watching) ? (
-        // Two lines so the title keeps the full row width: the number, checks, watch, and the
-        // next action sit underneath, aligned with the title text. The second line hugs its title
-        // and the block keeps space below, so stacked pull requests read as separate pairs.
         <div className="pb-2">
           {openRow(detail.title, "row")}
           <div className="-mt-1 flex h-6 min-w-0 items-center gap-0.5 ps-9 pe-1 text-xs text-muted-foreground">
@@ -509,8 +486,8 @@ export function ThreadDetailsPrRow({
           </div>
         </div>
       ) : watching ? (
-        <div className={THREAD_DETAILS_PANEL_LINK_SPLIT_GROUP_CLASS}>
-          {openRow(label, "link-primary")}
+        <div className={THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS}>
+          {openRow(label, "primary")}
           <span aria-hidden="true" className={THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS} />
           {watchControl("secondary")}
         </div>

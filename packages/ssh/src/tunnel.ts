@@ -66,17 +66,8 @@ const REMOTE_ARCHIVE_LAUNCH_TIMEOUT_MS = 900_000;
 const REMOTE_REUSE_READY_TIMEOUT_MS = 2_000;
 
 export interface RemoteT3RunnerOptions {
-  /**
-   * Dev mode: run `node <path>` on the remote instead of a release archive.
-   * The only mode that needs Node on the remote.
-   */
   readonly nodeScriptPath?: string | null;
   readonly nodeEngineRange?: string | null;
-  /**
-   * Exact version whose self-contained release archive the remote installs
-   * and runs. Required unless `nodeScriptPath` is set; the remote then needs
-   * neither Node nor npm.
-   */
   readonly archiveVersion?: string | null;
   readonly releaseBaseUrl?: string | null;
 }
@@ -240,13 +231,12 @@ function applyScriptPlaceholders(
 ): string {
   let result = template;
   for (const [token, value] of Object.entries(replacements)) {
-    result = result.replaceAll(`@@${token}@@`, value);
+    // A replacer function keeps `$$` and other `$` patterns in the value literal.
+    result = result.replaceAll(`@@${token}@@`, () => value);
   }
   return result;
 }
 
-// Re-exported from the shared HTTP readiness module so existing importers
-// (notably tunnel.test.ts) keep resolving it from here.
 export { describeReadinessCause };
 
 export const REMOTE_PICK_PORT_SCRIPT = `const fs = require("node:fs");
@@ -259,20 +249,38 @@ const preferred = Number.parseInt(raw, 10);
 const start = Number.isInteger(preferred) ? preferred : defaultPort;
 const end = start + scanWindow;
 
-function tryPort(port) {
+function canBind(port) {
   return new Promise((resolve) => {
     const server = net.createServer();
     server.unref();
     server.once("error", () => resolve(false));
     server.listen(port, "127.0.0.1", () => {
-      server.close((error) => resolve(error ? false : port));
+      server.close((error) => resolve(!error));
     });
+  });
+}
+
+// macOS lets the bind above succeed while another process listens on
+// *:<port>, so also skip any port that already answers on loopback.
+function answersOnLoopback(port) {
+  return new Promise((resolve) => {
+    const socket = net.connect({ port, host: "127.0.0.1" });
+    socket.setTimeout(1000);
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once("timeout", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once("error", () => resolve(false));
   });
 }
 
 (async () => {
   for (let port = start; port < end; port += 1) {
-    const available = await tryPort(port);
+    const available = (await canBind(port)) && !(await answersOnLoopback(port));
     if (available) {
       process.stdout.write(String(port));
       return;
@@ -815,7 +823,6 @@ export function buildRemoteT3RunnerScript(input?: RemoteT3RunnerOptions): string
   if (archiveVersion !== "" && !EXACT_ARCHIVE_VERSION.test(archiveVersion)) {
     throw new SshInvalidArchiveVersionError({ archiveVersion });
   }
-  // Strip the `/v<version>` the helper appends: the script builds URLs itself.
   const releaseBaseUrl = cliReleaseDownloadBaseUrl("", input?.releaseBaseUrl ?? undefined).replace(
     /\/v$/u,
     "",
@@ -956,8 +963,6 @@ export const issueRemotePairingToken = Effect.fn("ssh/tunnel.issueRemotePairingT
   const result = yield* runSshCommand(target, {
     remoteCommandArgs: ["sh", "-s"],
     stdin: buildRemotePairingScript(stateKey, runner),
-    // Pairing may be the first command on a cold remote, so it can install
-    // the archive on the way.
     ...(isNodeScriptRunner(runner) ? {} : { timeoutMs: REMOTE_ARCHIVE_LAUNCH_TIMEOUT_MS }),
     ...(input?.authSecret === undefined ? {} : { authSecret: input.authSecret }),
     ...(input?.batchMode === undefined ? {} : { batchMode: input.batchMode }),

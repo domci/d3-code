@@ -86,7 +86,7 @@ export const make = Effect.gen(function* () {
     const extension = sniffProjectIconExtension(bytes);
     if (!extension) return yield* new ProjectIconInvalidError({ reason: "unsupported-type" });
 
-    const id = yield* crypto.randomUUIDv4.pipe(Effect.orDie);
+    const id = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
     const finalPath = path.join(iconsDir, `${id}${extension}`);
     yield* fileSystem
       .makeDirectory(iconsDir, { recursive: true })

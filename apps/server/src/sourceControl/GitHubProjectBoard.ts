@@ -16,8 +16,11 @@ import {
 } from "@t3tools/contracts";
 
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
-import * as GitHubApi from "./GitHubApi.ts";
-import { gitHubApiHostForRemote } from "./GitHubCli.ts";
+import * as GitHubApi from "@t3tools/source-control-github/server/GitHubRequestPolicy";
+import * as GitHubGraphQlClient from "@t3tools/source-control-github/server/gitHubGraphQlClient";
+import { GraphQL, GraphQLClient, GraphQLGroup } from "effect/graphql";
+import { HttpClient } from "effect/http";
+import { gitHubApiHostForRemote } from "@t3tools/source-control-github/server/gitHubRepositoryResolution";
 
 /**
  * GitHub Projects (v2) boards for a repository's linked projects, with typed board actions.
@@ -335,8 +338,10 @@ const unreadable = (operation: string) =>
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
-  const api = yield* GitHubApi.GitHubApi;
   const repositoryIdentities = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
+  const graphQlContext = yield* Effect.context<
+    GitHubApi.GitHubRequestPolicy | HttpClient.HttpClient
+  >();
 
   /** Reads and writes here are a user acting on a board, so they may spend the GraphQL reserve. */
   const graphql = (
@@ -347,12 +352,31 @@ export const make = Effect.gen(function* () {
       readonly variables: Readonly<Record<string, unknown>>;
     },
   ) =>
-    api.graphql({ ...input, operation, allowReserve: true }).pipe(
+    Effect.gen(function* () {
+      const mutation = input.query.startsWith("mutation");
+      const document = input.query.replace(/^(query|mutation)\b/, "$1 ProjectBoard");
+      const operationDefinition = (mutation ? GraphQL.mutation : GraphQL.query)("ProjectBoard", {
+        document,
+        variables: Schema.Record(Schema.String, Schema.Unknown),
+        result: Schema.Unknown,
+      });
+      const client = yield* GraphQLClient.make(
+        GraphQLGroup.make(operationDefinition).middleware(GitHubGraphQlClient.GitHubGraphQlAuth),
+      ).pipe(Effect.provide(GitHubGraphQlClient.layer));
+      const data = yield* client
+        .ProjectBoard(input.variables)
+        .pipe(GitHubGraphQlClient.call({ host: input.host, operation, allowReserve: true }));
+      return yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({ data });
+    }).pipe(
+      Effect.provide(graphQlContext),
       Effect.mapError(
         (cause) =>
           new ProjectBoardError({
             operation,
-            reason: isMissingProjectScope(cause) ? "scope_missing" : "failed",
+            reason:
+              cause._tag === "GitHubApiResponseError" && isMissingProjectScope(cause)
+                ? "scope_missing"
+                : "failed",
             detail: cause.message,
             cause,
           }),

@@ -60,9 +60,13 @@ function EnvironmentSetup({
   const entries = useMemo(
     () =>
       sortProviderInstanceEntries(
-        applyProviderInstanceSettings(deriveProviderInstanceEntries(providers), settings),
+        applyProviderInstanceSettings(
+          deriveProviderInstanceEntries(providers),
+          settings,
+          project.id,
+        ),
       ),
-    [providers, settings],
+    [providers, settings, project.id],
   );
   const defaults = resolveProjectSettings(settings, project.id, project).settings;
   const [selection, setSelection] = useState<ModelSelection | null>(null);
@@ -103,6 +107,7 @@ function EnvironmentSetup({
       <legend className="mb-2 text-sm font-medium">{project.title}</legend>
       {active ? (
         <ProviderModelPicker
+          environmentId={project.environmentId}
           activeInstanceId={active.instanceId}
           model={active.model}
           lockedProvider={null}
@@ -119,7 +124,7 @@ function EnvironmentSetup({
         <select
           value={envMode}
           onChange={(event) => setEnvMode(event.target.value === "worktree" ? "worktree" : "local")}
-          className="h-8 rounded-md border border-input bg-background px-2 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="h-8 rounded-md border border-input bg-background px-2 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         >
           <option value="local">Project checkout</option>
           <option value="worktree">New worktree per thread</option>

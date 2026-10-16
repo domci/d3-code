@@ -173,7 +173,6 @@ it.effect("exports only verified D3 Connect requests", () =>
           return new Tracer.NativeSpan(options);
         },
       });
-    // "DPoP connect" is a D3 Connect session; any other DPoP token is rejected.
     const environmentAuth = {
       authenticateHttpRequest: (request: HttpServerRequest.HttpServerRequest) =>
         (request.headers.authorization === "DPoP forged"

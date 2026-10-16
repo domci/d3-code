@@ -7,7 +7,7 @@ import {
   formatContextWindowTokens,
   type ContextWindowSnapshot,
 } from "@t3tools/client-runtime/context-window";
-import { AppText as Text } from "../../components/AppText";
+import { AppText as Text } from "../../components/ui/AppText";
 import { ComposerInlineControl } from "../../components/ComposerToolbar";
 
 export const ThreadComposerStatus = memo(function ThreadComposerStatus(props: {

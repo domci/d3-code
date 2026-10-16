@@ -117,7 +117,6 @@ type MessageDispatchMode = Extract<
   { readonly type: "message.dispatch" }
 >["dispatchMode"];
 
-/** A native /compact or /logout turn: provider maintenance, not agent work. */
 export function isNativeMaintenanceCommand(message: {
   readonly text: string;
   readonly attachments: ReadonlyArray<ChatAttachment>;
@@ -129,7 +128,6 @@ export function isNativeMaintenanceCommand(message: {
   );
 }
 
-/** Resolve client intent from the state serialized by the thread dispatch lock. */
 export function resolveMessageDispatchIntent(
   projection: OrchestrationV2ThreadProjection,
   requestedMode: MessageDispatchMode,

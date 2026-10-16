@@ -1,7 +1,7 @@
 # Install D3 Code
 
 Build this fork to install D3 Code. The upstream installers, package registries,
-app store links, and hosted services below distribute T3 Code.
+app store links, and hosted services below distribute D3 Code.
 
 D3 Code runs coding agents on your computer and lets you control them from its
 desktop, web, or mobile app. Set up the machine where the agents will work first.
@@ -23,18 +23,19 @@ On Windows, in PowerShell:
 irm https://t3.codes/install.ps1 | iex
 ```
 
-This puts `t3` in `~/.local/bin`. If your shell reports `command not found`
+This installs the `t3` binary to `~/.local/bin`. If your shell reports `command not found`
 afterwards, that directory is not on your `PATH` yet; the installer prints the
 line to add. Set `T3CODE_CHANNEL=nightly` to install the nightly train, or
 `T3CODE_VERSION` to pin an exact version.
 
-| Task                                             | Command                                                   |
-| ------------------------------------------------ | --------------------------------------------------------- |
-| Start the server and open the web app            | `t3`                                                      |
-| Start the server without a browser               | `t3 serve`                                                |
-| Keep it running in the background (macOS, Linux) | `t3 service install` ([details](./background-service.md)) |
-| Move to the newest release                       | `t3 update`                                               |
-| Remove it again                                  | `t3 uninstall`                                            |
+| Task                                             | Command                                                                 |
+| ------------------------------------------------ | ----------------------------------------------------------------------- |
+| Start the server and open the web app            | `t3`                                                                    |
+| Start the server without a browser               | `t3 serve`                                                              |
+| Keep it running in the background (macOS, Linux) | `t3 service install` ([details](./background-service.md))               |
+| Move to the newest release                       | `t3 update`                                                             |
+| Reclaim database space                           | `t3 doctor` ([details](./background-service.md#reclaim-database-space)) |
+| Remove it again                                  | `t3 uninstall`                                                          |
 
 Run `t3 help` or `t3 --help` for the full reference. To start in a new working
 directory, use an explicit path such as `t3 ./my-project`. A bare directory name
@@ -71,13 +72,22 @@ or use a package manager:
 | ------------------ | ---------------------------------- |
 | Windows            | `winget install T3Tools.T3Code`    |
 | macOS              | `brew install --cask t3-code`      |
-| Debian, Ubuntu     | `sudo apt install ./T3-Code-*.deb` |
+| Debian, Ubuntu     | `sudo apt install ./D3-Code-*.deb` |
 | Arch Linux         | `yay -S t3code-bin`                |
 | Arch Linux nightly | `yay -S t3code-nightly-bin`        |
 
 The `.deb` updates itself like the other desktop builds. It asks for your
 password to install each update. If your desktop has no password prompt, the
 update fails. Download the new `.deb` and install it the same way.
+
+### The `t3` command
+
+The desktop app includes the `t3` command-line tool. To run it from any
+terminal, open **Settings → General → About** and choose **Install** next to
+**t3 command**. On macOS and Linux it adds a `t3` link to a folder on your
+`PATH`; on Windows it adds the app's command folder to your `PATH`. Open a new
+terminal afterwards. **Remove** takes it off again. If you already have `t3`
+from npm, it stays as it is.
 
 ### Windows Subsystem for Linux
 
@@ -107,13 +117,11 @@ Install D3 Code from the
 The phone connects to a server on another machine. Follow
 [remote access](./remote-access.md) to link it through D3 Connect or a pairing URL.
 
-Nightly builds need the beta app. The store apps cannot connect to them. A Nightly build also
-shows these links as QR codes in **Settings → General → Mobile app**.
+The store apps work with both stable and Nightly servers. Test builds are optional:
 
-- **iPhone and iPad:** join the [TestFlight beta](https://testflight.apple.com/join/XgaxaRtd).
-- **Android:** join the [beta group](https://groups.google.com/g/t3-code-v2-beta). With the same
-  Google account, open the [Google Play testing page](https://play.google.com/apps/testing/com.t3tools.t3code)
-  and become a tester.
+- **iPhone and iPad:** TestFlight is invite-only.
+- **Android:** download an APK from the
+  [Android beta releases](https://github.com/pingdotgg/t3code/releases?q=android-beta-).
 
 If the app crashes during launch, open Settings → Diagnostics on the next launch
 that succeeds. It lists startup crashes from the last 7 days with the error and
@@ -136,7 +144,8 @@ computer.
 | Grok Build  | Install [Grok Build CLI](https://x.ai/cli), then run `grok login`.                                                                                        |
 | OpenCode    | Install [OpenCode](https://opencode.ai), then run `opencode auth login`.                                                                                  |
 | Antigravity | Install and sign in with Google from D3 Code's provider settings.                                                                                         |
-| Pi          | Install [Pi](https://pi.dev), then run `pi` once to finish its login or API-key setup.                                                                    |
+| Pi          | Install [Pi](./providers-pi.md#set-up-pi) with Node.js 22.19 or newer, then run `pi` and `/login`.                                                        |
+| Muse Code   | Install [Muse Code](https://dev.meta.ai/docs/muse-code) on the server, run `muse login`, then enable it in Settings → Providers.                          |
 
 Provider CLIs must be on the server's `PATH`. If D3 Code cannot find one, set its
 **Binary path** in provider settings, especially when using a version manager.
@@ -165,7 +174,8 @@ their original values.
 
 For provider-specific setup and accounts, see [Codex](./providers-codex.md),
 [Claude](./providers-claude.md), [OpenCode](./providers-opencode.md),
-[Antigravity](./providers-antigravity.md), and [Pi](./providers-pi.md).
+[Antigravity](./providers-antigravity.md), [Pi](./providers-pi.md), and
+[Muse Code](./providers-muse.md).
 
 ## Next steps
 

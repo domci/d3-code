@@ -1,8 +1,9 @@
 import * as NodeNet from "node:net";
+
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NetService from "@t3tools/shared/Net";
-import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -117,14 +118,10 @@ describe("ssh tunnel scripts", () => {
     assert.notInclude(script, "npm exec");
     assert.notInclude(script, "t3@latest");
     assert.notInclude(script, 'exec t3 "$@"');
-    // Concurrent launches serialize on a per-version mkdir lock and recheck
-    // the completion marker after acquiring it.
     assert.include(
       script,
       'T3_LOCK="$HOME/.t3/runtime/versions/.$T3_ARCHIVE_VERSION.install.lock"',
     );
-    // mkdir is the exclusive create; the pid follows atomically. A dead owner
-    // is reclaimed at once, a never-published owner after a short grace.
     assert.include(script, 'while ! mkdir "$T3_LOCK" 2>/dev/null; do');
     assert.include(script, 'mv "$T3_LOCK/pid.tmp" "$T3_LOCK/pid"');
     assert.include(script, 'if ! kill -0 "$T3_LOCK_OWNER" 2>/dev/null; then');
@@ -139,8 +136,6 @@ describe("ssh tunnel scripts", () => {
       script.indexOf('"$T3_STAGING/t3" --version'),
       script.indexOf('> "$T3_STAGING/.install-complete"'),
     );
-    // Node discovery is defined for the dev path but only ever invoked inside
-    // the node-script branch, which the archive path skips entirely.
     assert.equal(script.split("ensure_remote_node_path || true").length - 1, 1);
     assert.isBelow(
       script.indexOf("ensure_remote_node_path || true"),
@@ -232,6 +227,12 @@ describe("ssh tunnel scripts", () => {
     assert.include(script, 'for T3_NODE_BIN in "$NVM_DIR"/versions/node/*/bin');
     assert.notInclude(script, "ensure $NVM_DIR/nvm.sh is available");
     assert.notInclude(script, "npx");
+  });
+
+  it("embeds the runner in the launch script byte for byte", () => {
+    const runner = SshTunnel.buildRemoteT3RunnerScript(ARCHIVE);
+    assert.include(runner, 'printf \'%s\\n\' "$$" > "$T3_LOCK/pid.tmp"');
+    assert.include(SshTunnel.buildRemoteLaunchScript(ARCHIVE), runner);
   });
 
   it("uses the remote t3 runner for launch and pairing scripts", () => {
@@ -745,7 +746,78 @@ describe("ssh tunnel scripts", () => {
   );
 });
 
-// Runs a generated script with an isolated HOME, as an SSH remote would.
+// On macOS, Node can bind 127.0.0.1:<port> while another process (such as the
+// desktop app with network access on) listens on *:<port>. Linux refuses that
+// bind unless both sockets set SO_REUSEPORT, so on Linux the preload adds it to
+// the picker's probe and the holder sets it too.
+const MACOS_BIND_PRELOAD = `const net = require("node:net");
+const listen = net.Server.prototype.listen;
+net.Server.prototype.listen = function (port, host, callback) {
+  if (typeof port !== "number" || typeof host !== "string") return listen.apply(this, arguments);
+  return listen.call(this, { port, host, reusePort: true }, callback);
+};
+`;
+
+describe("remote port picker", () => {
+  const hostPlatform = HostProcess.Platform.defaultValue();
+  const linuxHost = hostPlatform === "linux";
+  const windowsHost = hostPlatform === "win32";
+
+  const holdWildcardPort = Effect.acquireRelease(
+    Effect.callback<NodeNet.Server>((resume) => {
+      const server = NodeNet.createServer((socket) => socket.destroy());
+      server.once("error", (error) => resume(Effect.die(error)));
+      server.listen({ port: 0, host: "0.0.0.0", reusePort: linuxHost }, () =>
+        resume(Effect.succeed(server)),
+      );
+    }),
+    (server) =>
+      Effect.callback<void>((resume) => {
+        server.close(() => resume(Effect.void));
+      }),
+  );
+
+  it.effect.skipIf(windowsHost)("skips a port another server answers on loopback", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-pick-port-" });
+      yield* fs.writeFileString(`${root}/preload.cjs`, MACOS_BIND_PRELOAD);
+      yield* fs.writeFileString(`${root}/pick-port.cjs`, SshTunnel.REMOTE_PICK_PORT_SCRIPT);
+      const holder = yield* holdWildcardPort;
+      const heldPort = (holder.address() as NodeNet.AddressInfo).port;
+
+      const child = yield* spawner.spawn(
+        ChildProcess.make(process.execPath, [
+          ...(linuxHost ? ["--require", `${root}/preload.cjs`] : []),
+          `${root}/pick-port.cjs`,
+          "",
+          String(heldPort),
+          "20",
+        ]),
+      );
+      const [stdout, exitCode] = yield* Effect.all(
+        [
+          child.stdout.pipe(
+            Stream.decodeText(),
+            Stream.runFold(
+              () => "",
+              (acc, chunk) => acc + chunk,
+            ),
+          ),
+          child.exitCode.pipe(Effect.map(Number)),
+        ],
+        { concurrency: "unbounded" },
+      );
+
+      assert.equal(exitCode, 0);
+      const picked = Number(stdout);
+      assert.isAbove(picked, heldPort);
+      assert.isBelow(picked, heldPort + 20);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});
+
 const runScript = (home: string, args: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -778,20 +850,14 @@ const runScript = (home: string, args: ReadonlyArray<string>) =>
     return { stdout, stderr, exitCode };
   });
 
-// The archive runner is generated shell; string assertions cannot prove the
-// lock excludes concurrent installers. Run the real script against a tiny
-// fake archive served from a file:// mirror.
 describe("archive runner script", () => {
-  const hostPlatform = HostProcessPlatform.defaultValue();
-  const hostArch = HostProcessArchitecture.defaultValue();
+  const hostPlatform = HostProcess.Platform.defaultValue();
+  const hostArch = HostProcess.Architecture.defaultValue();
   const windowsHost = hostPlatform === "win32";
   const archiveVersion = "1.2.3-preview.20260911.4";
 
   const runRunner = (home: string, runner: string) => runScript(home, [runner, "--version"]);
 
-  // A fake "executable" that answers --version, packed the way the release
-  // workflow packs the real archive: one top-level directory named after the
-  // stem, checksummed in SHA256SUMS.
   const makeMirror = Effect.fn("makeMirror")(function* (root: string) {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const platform = hostPlatform === "darwin" ? "darwin" : "linux";
@@ -842,8 +908,6 @@ describe("archive runner script", () => {
           archiveVersion,
         );
 
-        // A lock left by a crashed installer (dead pid) must not block the
-        // next launch, and neither must one that never published a pid.
         const lock = `${versionsDir}/.${archiveVersion}.install.lock`;
         yield* fs.remove(`${versionsDir}/${archiveVersion}`, { recursive: true });
         yield* fs.makeDirectory(lock);
@@ -861,11 +925,8 @@ describe("archive runner script", () => {
   );
 });
 
-// Reuse decisions also live in generated shell. Drive the real launch script
-// against a fake server that answers readiness probes and writes the default
-// runtime file the way `t3 serve` does.
 describe("launch script", () => {
-  const windowsHost = HostProcessPlatform.defaultValue() === "win32";
+  const windowsHost = HostProcess.Platform.defaultValue() === "win32";
   const FAKE_SERVER = `const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
@@ -914,8 +975,6 @@ server.listen(Number(flag("--port")), "127.0.0.1", () => {
     });
   });
 
-  // Whether anything still accepts connections on the port. Unlike a PID
-  // check, this cannot mistake an unreaped, exited server for a running one.
   const isListening = (port: number) =>
     Effect.callback<boolean>((resume) => {
       const socket = NodeNet.connect(port, "127.0.0.1");
@@ -928,9 +987,6 @@ server.listen(Number(flag("--port")), "127.0.0.1", () => {
 
   const launchResult = (stdout: string) => JSON.parse(stdout.trim().split("\n").at(-1) ?? "");
 
-  // Writes the launch script for a fake server into a temporary HOME. The
-  // seeded remembered port keeps the test off the default 3773, which a live
-  // T3 on this machine may own.
   const prepareLaunch = Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-launch-script-" });
@@ -950,7 +1006,7 @@ server.listen(Number(flag("--port")), "127.0.0.1", () => {
       .pipe(Effect.map((pid) => Number(pid.trim())));
     // Launched servers outlive the script, so stop each PID the script
     // recorded, including one it recorded just before a failed assertion.
-    // SIGKILL also ends a server a test left stopped.
+
     const launchedPids: Array<number> = [];
     yield* Effect.addFinalizer(() =>
       readManagedPid.pipe(
@@ -977,9 +1033,8 @@ server.listen(Number(flag("--port")), "127.0.0.1", () => {
       assert.equal(launched.serverKind, "managed");
       return { launched, pid };
     });
-    // Starts a separate server on the default home, as a service would, and
-    // returns the port it reports. An unreaped server runs under a parent that
-    // never waits on it, so once it exits it lingers as a zombie.
+    // An unreaped server runs under a parent that never waits on it, so once it
+    // exits it lingers as a zombie.
     const startDefaultHomeServer = (
       flags: ReadonlyArray<string>,
       options?: { readonly unreaped?: boolean },
@@ -1020,14 +1075,10 @@ server.listen(Number(flag("--port")), "127.0.0.1", () => {
           yield* prepareLaunch;
         const { launched, pid: managedPid } = yield* launchManaged;
 
-        // The managed server wrote the default runtime file itself, so a
-        // reconnect must keep it rather than stop it as an external server.
         assert.deepEqual(yield* runLaunch, launched);
         assert.equal(yield* readManagedPid, managedPid);
         assert.isTrue(isAlive(managedPid));
 
-        // A remembered port that is stale must not hide our own server: the
-        // runtime file names its port.
         yield* fs.writeFileString(`${stateDir}/port`, `${yield* freeLoopbackPort}\n`);
         assert.deepEqual(yield* runLaunch, launched);
         assert.equal(yield* readManagedPid, managedPid);
@@ -1036,8 +1087,6 @@ server.listen(Number(flag("--port")), "127.0.0.1", () => {
           `${launched.remotePort}`,
         );
 
-        // A different server on the default home, such as a service, still
-        // takes over from the managed one.
         const servicePort = yield* startDefaultHomeServer([]);
         assert.deepEqual(yield* runLaunch, {
           remotePort: servicePort,
@@ -1049,8 +1098,6 @@ server.listen(Number(flag("--port")), "127.0.0.1", () => {
     60_000,
   );
 
-  // A stopped process keeps its listener but answers nothing, like a server
-  // stuck in a long SQLite stall.
   it.effect.skipIf(windowsHost)(
     "waits for its busy managed server instead of replacing it",
     () =>
@@ -1059,7 +1106,6 @@ server.listen(Number(flag("--port")), "127.0.0.1", () => {
         const { readManagedPid, runLaunch, launchManaged } = yield* prepareLaunch;
         const { launched, pid } = yield* launchManaged;
 
-        // It resumes after the two 2-second probes that used to replace it.
         process.kill(pid, "SIGSTOP");
         yield* spawner.spawn(ChildProcess.make("sh", ["-c", `sleep 5; kill -CONT ${pid}`]));
         assert.deepEqual(yield* runLaunch, launched);
@@ -1078,7 +1124,6 @@ server.listen(Number(flag("--port")), "127.0.0.1", () => {
           yield* prepareLaunch;
         const { launched, pid } = yield* launchManaged;
 
-        // Shorten the one-minute readiness budget so the test stays fast.
         const script = yield* fs.readFileString(launch);
         assert.include(script, 'wait_ready "60000"');
         yield* fs.writeFileString(
@@ -1108,7 +1153,6 @@ server.listen(Number(flag("--port")), "127.0.0.1", () => {
         const { stateDir, readManagedPid, runLaunch, launchManaged } = yield* prepareLaunch;
         const { pid: previousPid } = yield* launchManaged;
 
-        // A different runner on disk means the client updated: replace the server.
         yield* fs.writeFileString(`${stateDir}/run-t3.sh`, "# previous runner\n");
         assert.equal((yield* runLaunch).serverKind, "managed");
         const replacementPid = yield* readManagedPid;
@@ -1168,9 +1212,6 @@ server.listen(Number(flag("--port")), "127.0.0.1", () => {
         const { stateDir, launchManaged, runLaunch } = yield* prepareLaunch;
         const { launched, pid } = yield* launchManaged;
 
-        // An interrupted launch, or a recycled PID, can leave a PID that matches
-        // the runtime file without the managed marker. A changed runner must not
-        // turn that into a restart of a server this launcher cannot claim.
         yield* fs.remove(`${stateDir}/managed`);
         yield* fs.writeFileString(`${stateDir}/run-t3.sh`, "# superseded runner\n");
         assert.deepEqual(yield* runLaunch, {
@@ -1188,12 +1229,9 @@ server.listen(Number(flag("--port")), "127.0.0.1", () => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const { stateDir, runLaunch, startDefaultHomeServer } = yield* prepareLaunch;
-        // Ownership files from an earlier managed launch that lost its PID.
         yield* fs.writeFileString(`${stateDir}/managed`, "managed\n");
         const servicePort = yield* startDefaultHomeServer(["--answer-once"]);
 
-        // The server answers adoption and then stalls. A second readiness
-        // probe would launch another server on the same home.
         assert.deepEqual(yield* runLaunch, { remotePort: servicePort, serverKind: "external" });
         assert.isFalse(yield* fs.exists(`${stateDir}/pid`));
       }).pipe(Effect.provide(NodeServices.layer)),
@@ -1209,10 +1247,6 @@ server.listen(Number(flag("--port")), "127.0.0.1", () => {
         const { pid: previousPid } = yield* launchManaged;
         yield* startDefaultHomeServer(["--exit-after-answer"], { unreaped: true });
 
-        // The service answers adoption and then exits while the managed
-        // server is being stopped, staying a zombie, so the script must launch
-        // a new server rather than return the dead one. The freed port may be
-        // reused.
         const result = yield* runLaunch;
         assert.equal(result.serverKind, "managed");
         const replacementPid = yield* readManagedPid;

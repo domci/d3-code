@@ -90,13 +90,11 @@ export interface NewProjectScriptInput {
   command: string;
   icon: ProjectScriptIcon;
   runOnWorktreeCreate: boolean;
-  /** Setup scripts only: hold the agent until the script exits. */
   waitForSetup: boolean;
+  runOnSettle: boolean;
   /** Omit to preserve the current shortcut when the form did not edit it. */
   keybinding?: string | null;
-  /** Optional URL to open in the in-app preview when this script runs. */
   previewUrl: string | null;
-  /** When true, automatically open the preview panel pointed at `previewUrl`. */
   autoOpenPreview: boolean;
 }
 
@@ -108,16 +106,15 @@ export const EMPTY_PROJECT_SCRIPT_INPUT: NewProjectScriptInput = {
   icon: "play",
   runOnWorktreeCreate: false,
   waitForSetup: false,
+  runOnSettle: false,
   keybinding: null,
   previewUrl: null,
   autoOpenPreview: false,
 };
 
-/** What the editor dialog should open with. `scriptId: null` means "add". */
 export interface ProjectScriptEditorRequest {
   scriptId: string | null;
   initial: NewProjectScriptInput;
-  /** Validation error to show immediately (e.g. a failed t3.json import). */
   error?: string;
 }
 
@@ -133,6 +130,7 @@ export function editorRequestForScript(
       icon: script.icon,
       runOnWorktreeCreate: script.runOnWorktreeCreate,
       waitForSetup: script.runOnWorktreeCreate && script.async === false,
+      runOnSettle: script.runOnSettle ?? false,
       keybinding: keybindingValueForCommand(keybindings, commandForProjectScript(script.id)),
       previewUrl: script.previewUrl ?? null,
       autoOpenPreview: script.autoOpenPreview ?? false,
@@ -140,11 +138,6 @@ export function editorRequestForScript(
   };
 }
 
-/**
- * Add/edit dialog for a project script, shared by the chat-header scripts menu
- * and the project settings page. The parent owns which script (if any) is
- * being edited via `request`; the dialog owns the form state and validation.
- */
 export function ProjectScriptEditorDialog({
   environmentId,
   editScope = AuthOrchestrationOperateScope,
@@ -157,7 +150,6 @@ export function ProjectScriptEditorDialog({
   environmentId: EnvironmentId;
   editScope?: typeof AuthOrchestrationOperateScope | typeof AuthSettingsWriteScope;
   request: ProjectScriptEditorRequest | null;
-  /** Existing scripts, used to derive a unique id for new scripts. */
   scripts: ReadonlyArray<ProjectScript>;
   onSubmit: (
     scriptId: string | null,
@@ -175,6 +167,7 @@ export function ProjectScriptEditorDialog({
   const [iconPickerOpen, setIconPickerOpen] = useComposerMenuState(!canEditActions);
   const [runOnWorktreeCreate, setRunOnWorktreeCreate] = useState(false);
   const [waitForSetup, setWaitForSetup] = useState(false);
+  const [runOnSettle, setRunOnSettle] = useState(false);
   const [keybinding, setKeybinding] = useState("");
   const [previewUrl, setPreviewUrl] = useState("");
   const [autoOpenPreview, setAutoOpenPreview] = useState(false);
@@ -187,7 +180,6 @@ export function ProjectScriptEditorDialog({
   const isEditing = request?.scriptId != null;
   const isSaving = request !== null && savingRequest === request;
 
-  // A save completion must not affect a replacement request or an unmounted editor.
   useLayoutEffect(
     () => () => {
       if (pendingSubmissionRef.current?.request === request) {
@@ -197,7 +189,6 @@ export function ProjectScriptEditorDialog({
     [request],
   );
 
-  // Hydrate the form whenever a new request opens the dialog.
   useEffect(() => {
     if (!request) return;
     setName(request.initial.name);
@@ -206,6 +197,7 @@ export function ProjectScriptEditorDialog({
     setIconPickerOpen(false);
     setRunOnWorktreeCreate(request.initial.runOnWorktreeCreate);
     setWaitForSetup(request.initial.waitForSetup);
+    setRunOnSettle(request.initial.runOnSettle);
     setKeybinding(request.initial.keybinding ?? "");
     setPreviewUrl(request.initial.previewUrl ?? "");
     setAutoOpenPreview(request.initial.autoOpenPreview);
@@ -279,6 +271,7 @@ export function ProjectScriptEditorDialog({
         icon,
         runOnWorktreeCreate,
         waitForSetup: runOnWorktreeCreate && waitForSetup,
+        runOnSettle,
         ...((request.scriptId === null && canChangeKeybinding) || changesKeybinding
           ? { keybinding: keybindingRule?.key ?? null }
           : {}),
@@ -363,7 +356,7 @@ export function ProjectScriptEditorDialog({
                                 type="button"
                                 className={`relative flex flex-col items-center gap-2 rounded-md border px-2 py-2 text-xs dark:border-transparent ${
                                   isSelected
-                                    ? "border-primary/70 bg-primary/10 dark:ring-1 dark:ring-primary/30"
+                                    ? "border-primary/70 bg-primary/10 ring-inset dark:ring-1 dark:ring-primary/30"
                                     : "border-border/70 hover:bg-accent/60 dark:bg-white/[0.035]"
                                 }`}
                                 onClick={() => {
@@ -441,6 +434,13 @@ export function ProjectScriptEditorDialog({
                     checked={waitForSetup}
                     disabled={!runOnWorktreeCreate}
                     onCheckedChange={(checked) => setWaitForSetup(Boolean(checked))}
+                  />
+                </label>
+                <label className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2 text-sm dark:border-transparent dark:bg-white/[0.035]">
+                  <span>Run in the thread's worktree when the thread settles</span>
+                  <Switch
+                    checked={runOnSettle}
+                    onCheckedChange={(checked) => setRunOnSettle(Boolean(checked))}
                   />
                 </label>
                 <label

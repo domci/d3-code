@@ -10,7 +10,6 @@ import PullRequestFilesViewed from "./Migrations/053_PullRequestFilesViewed.ts";
 import RemoveRedundantProjectionIndexes from "./Migrations/056_RemoveRedundantProjectionIndexes.ts";
 import OrchestrationV2 from "./Migrations/055_OrchestrationV2.ts";
 
-// The V2 schema is unchanged from the published September 15–16 previews.
 const seedPreview = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   yield* runMigrations({ toMigrationInclusive: 52 });
@@ -28,6 +27,34 @@ const seedPreview = Effect.gen(function* () {
 });
 
 describe("V2 preview upgrade", () => {
+  it.effect.each([false, true])(
+    "preserves folders while applying upstream schema (existing fork: %s)",
+    (existingFork) =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        if (existingFork) {
+          yield* runMigrations({ toMigrationInclusive: 59 });
+          yield* sql`
+          INSERT INTO projection_projects (project_id, title, workspace_root, scripts_json, thread_folders_json, created_at, updated_at)
+          VALUES ('fork-project', 'Fork', '/fork', '[]', '[{"id":"folder","name":"Work"}]', '2026-10-01', '2026-10-01')
+        `;
+        }
+        yield* runMigrations();
+        yield* sql`
+        INSERT INTO mcp_app_model_context (thread_id, item_id, server, tool, text, updated_at)
+        VALUES ('thread', 'item', 'server', 'tool', 'context', '2026-10-16')
+      `;
+        assert.deepStrictEqual(yield* sql`SELECT text FROM mcp_app_model_context`, [
+          { text: "context" },
+        ]);
+        assert.deepStrictEqual(
+          yield* sql`SELECT thread_folders_json FROM projection_projects WHERE project_id = 'fork-project'`,
+          existingFork ? [{ thread_folders_json: '[{"id":"folder","name":"Work"}]' }] : [],
+        );
+        assert.deepStrictEqual(yield* runMigrations(), []);
+      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
   it.effect("upgrades a published preview without replaying V2 or losing import progress", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
@@ -44,6 +71,10 @@ describe("V2 preview upgrade", () => {
         [57, "ScheduledTaskWebhooks"],
         [58, "WebhookRelayDeliveries"],
         [59, "ProjectThreadFolders"],
+        [60, "McpAppModelContext"],
+        [61, "ThreadSnapshotWindowIndexes"],
+        [62, "PullRequestReviewGuides"],
+        [63, "ThreadFailureLookupIndex"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
       assert.deepStrictEqual(yield* sql`SELECT * FROM orchestration_v2_legacy_imports`, imports);
@@ -130,6 +161,10 @@ describe("V2 preview upgrade", () => {
         [57, "ScheduledTaskWebhooks"],
         [58, "WebhookRelayDeliveries"],
         [59, "ProjectThreadFolders"],
+        [60, "McpAppModelContext"],
+        [61, "ThreadSnapshotWindowIndexes"],
+        [62, "PullRequestReviewGuides"],
+        [63, "ThreadFailureLookupIndex"],
       ]);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );

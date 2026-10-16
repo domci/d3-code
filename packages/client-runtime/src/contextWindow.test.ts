@@ -13,7 +13,25 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 import * as DateTime from "effect/DateTime";
 import { v2Now, v2Projection } from "./state/orchestrationV2TestFixtures.ts";
-import { deriveLatestContextWindowSnapshot, formatContextWindowTokens } from "./contextWindow.ts";
+import {
+  deriveLatestContextWindowSnapshot,
+  formatContextWindowTokens,
+  latestProviderTurnTokenUsage,
+} from "./contextWindow.ts";
+
+describe("latestProviderTurnTokenUsage", () => {
+  it("picks the newest report, not the last turn in snapshot order", () => {
+    const usage = (usedTokens: number, updatedAt: string) => ({
+      tokenUsage: { usedTokens, updatedAt },
+    });
+    const latest = latestProviderTurnTokenUsage([
+      usage(300_000, "2026-06-20T12:00:00.000Z"),
+      {},
+      usage(90_000, "2026-06-20T09:00:00.000Z"),
+    ]);
+    expect(latest?.usedTokens).toBe(300_000);
+  });
+});
 
 const providerThread: OrchestrationV2ProviderThread = {
   id: ProviderThreadId.make("native-thread"),

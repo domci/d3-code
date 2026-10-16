@@ -43,7 +43,7 @@ export function ProjectIconDropzone({
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
         className={cn(
-          "flex h-9 items-center gap-2 rounded-md border border-dashed px-3 text-xs text-muted-foreground outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60",
+          "flex h-9 items-center gap-2 rounded-md border border-dashed px-3 text-xs text-muted-foreground outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60",
           dragging && "border-primary bg-primary/5 text-foreground",
         )}
       >
