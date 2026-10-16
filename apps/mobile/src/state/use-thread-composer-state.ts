@@ -324,7 +324,6 @@ export function useThreadComposerState() {
           threadId: selectedThreadShell.id,
         }),
   );
-  const canSteerActiveTurn = queueWorkflow?.canPromoteToSteer === true;
   const queuedRunEdit = useQueuedRunEdit(selectedThreadKey);
   const composerDraftKey =
     selectedThreadKey === null
@@ -428,6 +427,8 @@ export function useThreadComposerState() {
     selectedThreadRuntime,
     selectedThreadVisibleTurnItems,
   ]);
+  // A compacting turn cannot take steering input, so follow-ups queue meanwhile.
+  const canSteerActiveTurn = queueWorkflow?.canPromoteToSteer === true && !isCompacting;
 
   const runlessWorkStartedAt = useMemo(
     () =>

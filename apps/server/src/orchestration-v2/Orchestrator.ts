@@ -77,7 +77,11 @@ import {
   SHARED_WORKSPACE_RESTORE_MESSAGE,
 } from "./CheckpointRestoreSafety.ts";
 import { CheckpointServiceV2 } from "./CheckpointService.ts";
-import { CommandPolicyV2, resolveMessageDispatchIntent } from "./CommandPolicy.ts";
+import {
+  CommandPolicyV2,
+  isNativeMaintenanceCommand,
+  resolveMessageDispatchIntent,
+} from "./CommandPolicy.ts";
 import { CommandReceiptStoreV2 } from "./CommandReceiptStore.ts";
 import { ContextHandoffServiceV2 } from "./ContextHandoffService.ts";
 import { notificationTurnItem } from "./Notification.ts";
@@ -378,18 +382,6 @@ function wakeWorkStartedAt(
         DateTime.Order(right.startedAt, left.startedAt) || right.run.ordinal - left.run.ordinal,
     )[0]?.run;
   return previous === undefined ? {} : { workStartedAt: orchestrationV2RunWorkStartedAt(previous) };
-}
-
-/** A native /compact or /logout turn: provider maintenance, not agent work. */
-export function isNativeMaintenanceCommand(message: {
-  readonly text: string;
-  readonly attachments: ReadonlyArray<ChatAttachment>;
-  readonly context?: import("@t3tools/contracts").OrchestrationMessageContext | undefined;
-}): boolean {
-  return (
-    message.attachments.length === 0 &&
-    ["/compact", "/logout"].includes(message.text.trim().toLowerCase())
-  );
 }
 
 /** A native `/goal` command. It changes the provider's goal, so it never steers a running turn. */
@@ -2494,6 +2486,17 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         commandId: command.commandId,
         commandType: command.type,
         cause: `Thread ${command.threadId} worktree changed before the metadata update could be applied.`,
+      });
+    }
+    if (
+      command.type === "thread.metadata.update" &&
+      command.expectedBranch !== undefined &&
+      command.expectedBranch !== thread.branch
+    ) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: `Thread ${command.threadId} branch changed before the metadata update could be applied.`,
       });
     }
     if (command.type === "thread.metadata.update" && command.expectedEmpty === true) {

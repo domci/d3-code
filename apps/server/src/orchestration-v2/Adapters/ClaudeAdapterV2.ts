@@ -4359,6 +4359,15 @@ export function makeClaudeAdapterV2(
                 completedAt: task.completedAt,
               },
             });
+          }
+          // Ahead of the child thread's records: the run a resume attributes
+          // the subagent to adopts its child thread from this event.
+          yield* emitProviderEvent({
+            type: "subagent.updated",
+            driver: CLAUDE_PROVIDER,
+            subagent: task,
+          });
+          if (lifecycleChanged) {
             yield* emitProviderEvent({
               type: "node.updated",
               driver: CLAUDE_PROVIDER,
@@ -4425,11 +4434,6 @@ export function makeClaudeAdapterV2(
               turnItem: promptArtifacts.turnItem,
             });
           }
-          yield* emitProviderEvent({
-            type: "subagent.updated",
-            driver: CLAUDE_PROVIDER,
-            subagent: task,
-          });
           yield* emitProviderEvent({
             type: "turn_item.updated",
             driver: CLAUDE_PROVIDER,

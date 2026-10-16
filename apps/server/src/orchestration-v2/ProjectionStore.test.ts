@@ -27,6 +27,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import * as Tracer from "effect/Tracer";
 import * as SqlClient from "effect/sql/SqlClient";
 import { projectThreadAwarenessV2 } from "@t3tools/shared/agentAwareness";
 
@@ -51,6 +52,23 @@ const modelSelection = {
 const driver = ProviderDriverKind.make("codex");
 const providerInstanceId = modelSelection.instanceId;
 const encodeUnknownJsonString = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
+const traceSqlStatements = () => {
+  const statements: Array<string> = [];
+  const tracer = Tracer.make({
+    span(options) {
+      const span = new Tracer.NativeSpan(options);
+      const end = span.end.bind(span);
+      span.end = (endTime, exit) => {
+        end(endTime, exit);
+        const query = span.attributes.get("db.query.text");
+        if (typeof query === "string") statements.push(query);
+      };
+      return span;
+    },
+  });
+  return { statements, tracer };
+};
 
 const addRolledBackRecoveryCandidate = Effect.fn("addRolledBackRecoveryCandidate")(function* (
   suffix: string,
@@ -1750,6 +1768,99 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
       const markedUnread = yield* projectionStore.getThreadProjection(threadId);
       assert.isNull(markedUnread.thread.lastVisitedAt);
       assert.deepEqual(markedUnread.thread.updatedAt, createdAt);
+    }),
+  );
+
+  it.effect("dates thread activity by a run event and leaves the rest of the thread alone", () =>
+    Effect.gen(function* () {
+      const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+      const createdAt = yield* DateTime.now;
+      const runOccurredAt = DateTime.add(createdAt, { seconds: 5 });
+      const threadId = ThreadId.make("thread:projection-activity");
+      const runId = RunId.make("run:projection-activity");
+      const rootNodeId = NodeId.make("node:projection-activity");
+      const thread = {
+        createdBy: "user" as const,
+        creationSource: "web" as const,
+        id: threadId,
+        projectId: ProjectId.make("project:projection-activity"),
+        title: "Projection activity",
+        providerInstanceId,
+        modelSelection,
+        runtimeMode: "full-access" as const,
+        interactionMode: "default" as const,
+        branch: "feature/activity",
+        worktreePath: null,
+        activeProviderThreadId: null,
+        lineage: {
+          parentThreadId: null,
+          relationshipToParent: null,
+          rootThreadId: threadId,
+        },
+        forkedFrom: null,
+        createdAt,
+        updatedAt: createdAt,
+        archivedAt: null,
+        settledOverride: null,
+        settledAt: null,
+        lastVisitedAt: createdAt,
+        deletedAt: null,
+      };
+
+      yield* projectionStore.apply({
+        id: EventId.make("event:projection-activity:created"),
+        type: "thread.created",
+        threadId,
+        occurredAt: createdAt,
+        payload: thread,
+      });
+      const created = (yield* projectionStore.getThreadProjection(threadId)).thread;
+
+      const { statements, tracer } = traceSqlStatements();
+      yield* projectionStore
+        .apply({
+          id: EventId.make("event:projection-activity:run-created"),
+          type: "run.created",
+          threadId,
+          runId,
+          nodeId: rootNodeId,
+          driver,
+          providerInstanceId,
+          occurredAt: runOccurredAt,
+          payload: {
+            id: runId,
+            threadId,
+            ordinal: 1,
+            providerInstanceId,
+            modelSelection,
+            providerThreadId: null,
+            userMessageId: MessageId.make("message:projection-activity"),
+            rootNodeId,
+            activeAttemptId: null,
+            status: "running" as const,
+            requestedAt: runOccurredAt,
+            startedAt: runOccurredAt,
+            completedAt: null,
+            checkpointId: null,
+            contextHandoffId: null,
+          },
+        })
+        .pipe(Effect.withTracer(tracer));
+      // The thread row is patched in place, never read back to be re-encoded.
+      assert.isEmpty(
+        statements.filter(
+          (statement) =>
+            /^\s*SELECT/i.test(statement) &&
+            statement.includes("orchestration_v2_projection_threads"),
+        ),
+      );
+
+      const active = (yield* projectionStore.getThreadProjection(threadId)).thread;
+      assert.deepEqual(active, { ...created, updatedAt: runOccurredAt });
+      const shell = (yield* projectionStore.getShellSnapshot()).threads.find(
+        (candidate) => candidate.id === threadId,
+      );
+      assert.deepEqual(shell?.updatedAt, runOccurredAt);
     }),
   );
 

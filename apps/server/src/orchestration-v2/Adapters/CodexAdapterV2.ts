@@ -212,6 +212,8 @@ export function codexProviderTurnTokenUsage(
 }
 const DEFAULT_CODEX_SETTINGS = Schema.decodeSync(CodexSettings)({});
 const CODEX_ASSISTANT_DELTA_FLUSH_INTERVAL_MS = 50;
+// Each flush stores the whole plan three times, so batch updates to reduce writes.
+const CODEX_PLAN_DELTA_FLUSH_INTERVAL_MS = 400;
 const CodexBackgroundTerminalTerminateResponse = Schema.Struct({
   terminated: Schema.Boolean,
 });
@@ -1803,8 +1805,6 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
         const providerRetries = yield* Ref.make(
           new Map<ProviderTurnId, ActiveCodexProviderRetry>(),
         );
-        // Streamed plan text per plan item, dropped when the item completes.
-        const planDeltas = new Map<string, string>();
         const planIds = yield* Ref.make(new Map<string, OrchestrationV2PlanArtifact["id"]>());
         const pendingRuntimeRequests = yield* Ref.make(
           new Map<string, PendingCodexRuntimeRequest>(),
@@ -3642,6 +3642,43 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
             return { node, plan, turnItem };
           });
 
+        // Streamed plan text, flushed at most once per interval. A turn that ends
+        // early leaves its partial plan streaming, as an unfinished plan item.
+        const planDeltas = yield* makeProviderTextDeltaCoalescer({
+          flushIntervalMs: CODEX_PLAN_DELTA_FLUSH_INTERVAL_MS,
+          emit: (update) =>
+            Effect.gen(function* () {
+              const resolved = yield* resolveItemEventContext(update.turnId);
+              if (resolved === undefined) return;
+              const interrupted = (yield* Ref.get(terminalizedNonCompletedNativeTurns)).has(
+                update.turnId,
+              );
+              const artifacts = yield* buildProposedPlanArtifacts({
+                context: resolved.context,
+                nativeItemId: update.itemId,
+                // A finished proposal stays active until Implement consumes it.
+                status: "active",
+                markdown: update.text,
+                completed: update.completed && !interrupted,
+              });
+              yield* emitProviderEvent({
+                type: "node.updated",
+                driver: CODEX_PROVIDER,
+                node: artifacts.node,
+              });
+              yield* emitProviderEvent({
+                type: "plan.updated",
+                driver: CODEX_PROVIDER,
+                plan: artifacts.plan,
+              });
+              yield* emitProviderEvent({
+                type: "turn_item.updated",
+                driver: CODEX_PROVIDER,
+                turnItem: artifacts.turnItem,
+              });
+            }).pipe(Effect.orDie),
+        });
+
         const buildTodoListArtifacts = (input: {
           readonly context: ActiveCodexTurnContext;
           readonly nativeItemId: string;
@@ -3939,28 +3976,10 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
               return;
             }
             yield* completeProviderRetry(context, yield* DateTime.now);
-            const markdown = `${planDeltas.get(payload.itemId) ?? ""}${payload.delta}`;
-            planDeltas.set(payload.itemId, markdown);
-            const artifacts = yield* buildProposedPlanArtifacts({
-              context,
-              nativeItemId: payload.itemId,
-              status: "active",
-              markdown,
-            });
-            yield* emitProviderEvent({
-              type: "node.updated",
-              driver: CODEX_PROVIDER,
-              node: artifacts.node,
-            });
-            yield* emitProviderEvent({
-              type: "plan.updated",
-              driver: CODEX_PROVIDER,
-              plan: artifacts.plan,
-            });
-            yield* emitProviderEvent({
-              type: "turn_item.updated",
-              driver: CODEX_PROVIDER,
-              turnItem: artifacts.turnItem,
+            yield* planDeltas.append({
+              turnId: payload.turnId,
+              itemId: payload.itemId,
+              delta: payload.delta,
             });
           }).pipe(Effect.orDie),
         );
@@ -4601,33 +4620,10 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
             }
 
             if (payload.item.type === "plan") {
-              const markdown =
-                payload.item.text.length > 0
-                  ? payload.item.text
-                  : (planDeltas.get(payload.item.id) ?? "");
-              planDeltas.delete(payload.item.id);
-              // A finished proposal stays active until Implement consumes it.
-              const artifacts = yield* buildProposedPlanArtifacts({
-                context,
-                nativeItemId: payload.item.id,
-                status: "active",
-                markdown,
-                completed: true,
-              });
-              yield* emitProviderEvent({
-                type: "node.updated",
-                driver: CODEX_PROVIDER,
-                node: artifacts.node,
-              });
-              yield* emitProviderEvent({
-                type: "plan.updated",
-                driver: CODEX_PROVIDER,
-                plan: artifacts.plan,
-              });
-              yield* emitProviderEvent({
-                type: "turn_item.updated",
-                driver: CODEX_PROVIDER,
-                turnItem: artifacts.turnItem,
+              yield* planDeltas.complete({
+                turnId: payload.turnId,
+                itemId: payload.item.id,
+                ...(payload.item.text.length > 0 ? { finalText: payload.item.text } : {}),
               });
               return;
             }
@@ -5467,6 +5463,7 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
               }
               yield* agentMessageDeltas.flushTurn(input.nativeTurnId);
               yield* reasoningDeltas.flushTurn(input.nativeTurnId);
+              yield* planDeltas.flushTurn(input.nativeTurnId);
               for (const [key, part] of reasoningParts) {
                 if (part.turnId === input.nativeTurnId) reasoningParts.delete(key);
               }

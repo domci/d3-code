@@ -1367,6 +1367,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   isRunning: boolean;
   canInterrupt: boolean;
   followUpBehavior: "queue" | "steer";
+  canSteer: boolean;
   alternateShortcutLabel: string | null;
   showPlanFollowUpPrompt: boolean;
   promptHasText: boolean;
@@ -1407,6 +1408,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         isRunning={props.isRunning}
         canInterrupt={props.canInterrupt}
         followUpBehavior={props.followUpBehavior}
+        canSteer={props.canSteer}
         alternateShortcutLabel={props.alternateShortcutLabel}
         showPlanFollowUpPrompt={props.showPlanFollowUpPrompt}
         promptHasText={props.promptHasText}
@@ -1534,6 +1536,7 @@ export interface ChatComposerProps {
 
   // Session phase
   phase: SessionPhase;
+  isCompacting: boolean;
   /** Stop is offered: a run is preparing, starting, or running. */
   canInterrupt: boolean;
   isConnecting: boolean;
@@ -1719,6 +1722,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isRevertingCheckpoint = false,
     sendDisabledReason: externalSendDisabledReason,
     isPreparingWorktree,
+    isCompacting,
     environmentUnavailable,
     activePendingApproval,
     pendingApprovals,
@@ -4209,6 +4213,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 running: phase === "running",
                 alternateModifier: false,
                 activeTurnDefault: settings.followUpBehavior,
+                canSteer: !isCompacting,
               }),
             submissionIntent,
           );
@@ -4228,6 +4233,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       blurMobileComposerAfterSend,
       environmentId,
       isSendDisabled,
+      isCompacting,
       noProviderAvailable,
       onSend,
       settings.followUpBehavior,
@@ -4245,10 +4251,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           running: phase === "running",
           alternateModifier: event.metaKey || event.ctrlKey,
           activeTurnDefault: settings.followUpBehavior,
+          canSteer: !isCompacting,
         }),
       );
     },
-    [phase, settings.followUpBehavior, submitComposer],
+    [isCompacting, phase, settings.followUpBehavior, submitComposer],
   );
   const submitCitationAndSend = useCallback(() => {
     submitComposer(
@@ -4257,9 +4264,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         running: phase === "running",
         alternateModifier: false,
         activeTurnDefault: settings.followUpBehavior,
+        canSteer: !isCompacting,
       }),
     );
-  }, [phase, settings.followUpBehavior, submitComposer]);
+  }, [isCompacting, phase, settings.followUpBehavior, submitComposer]);
   const compactThreadContext = useCallback(() => {
     if (
       !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope) ||
@@ -4442,6 +4450,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           running: phase === "running",
           alternateModifier: submissionIntent === "alternate",
           activeTurnDefault: settings.followUpBehavior,
+          canSteer: !isCompacting,
         }),
         submissionIntent,
       );
@@ -7551,6 +7560,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     isRunning={phase === "running"}
                     canInterrupt={canInterrupt}
                     followUpBehavior={settings.followUpBehavior}
+                    canSteer={!isCompacting}
                     alternateShortcutLabel={shortcutLabelForCommand(
                       keybindings,
                       "composer.sendAlternate",
