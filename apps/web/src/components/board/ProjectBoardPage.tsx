@@ -617,132 +617,131 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
         </DialogPopup>
       </Dialog>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
-        <WorkspacePageHeader electron={isElectron} className="h-auto">
-          <div className="flex w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-2 py-2">
-            <WorkspaceBreadcrumb ariaLabel="Board breadcrumb">
-              <WorkspaceBreadcrumbItem current>
-                <h1>Board</h1>
-              </WorkspaceBreadcrumbItem>
-            </WorkspaceBreadcrumb>
-            <div className="min-w-0 flex-1" />
-            {loaded.length === 0 ? null : (
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="search"
-                  value={cardSearch}
-                  placeholder="Search cards"
-                  aria-label="Search cards by number, title, repository, label, assignee or text"
-                  onChange={(event) => setCardSearch(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Escape") setCardSearch("");
-                  }}
-                  className="h-8 w-48 rounded-md border border-input bg-background px-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                />
-                {cardSearch === "" ? null : (
-                  <>
-                    <span className="text-xs tabular-nums text-muted-foreground">
-                      {columns.reduce((total, column) => total + column.items.length, 0)} found
-                    </span>
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      aria-label="Clear search"
-                      onClick={() => setCardSearch("")}
-                    >
-                      Clear
-                    </Button>
-                  </>
-                )}
-              </div>
-            )}
-            {boardRepos.length === 0 ? null : (
-              <Menu>
-                <MenuTrigger render={<Button variant="outline" size="sm" />}>
-                  Repositories ({activeKeys.size}/{boardRepos.length})
-                </MenuTrigger>
-                <MenuPopup align="end" side="bottom">
-                  {boardRepos.map((repo) => (
-                    <MenuCheckboxItem
-                      key={repo.key}
-                      checked={activeKeys.has(repo.key)}
-                      onCheckedChange={(next) =>
-                        pickRepositories(
-                          next
-                            ? [...activeKeys, repo.key]
-                            : [...activeKeys].filter((key) => key !== repo.key),
-                        )
-                      }
-                    >
-                      <span className="flex min-w-0 items-center gap-2">
-                        <span
-                          aria-hidden
-                          className={cn(
-                            "size-2 shrink-0 rounded-full",
-                            repositoryAccent(repo.label).dot,
-                          )}
-                        />
-                        <ProjectFavicon project={repo.project} className="size-3.5 shrink-0" />
-                        <span className="min-w-0 truncate">{repo.label}</span>
-                      </span>
-                    </MenuCheckboxItem>
-                  ))}
-                </MenuPopup>
-              </Menu>
-            )}
-            {loaded.length === 0 ? null : (
-              <>
-                <BoardSelect
-                  label="Label"
-                  value={filters.label ?? ""}
-                  onChange={(value) =>
-                    setFilterState({ ...filters, label: value === "" ? null : value })
-                  }
-                >
-                  <option value="">All labels</option>
-                  {facets.labels.map((label) => (
-                    <option key={label} value={label}>
-                      {label}
-                    </option>
-                  ))}
-                </BoardSelect>
-                <BoardSelect
-                  label="State"
-                  value={filters.state}
-                  onChange={(value) =>
-                    setFilterState({ ...filters, state: value as BoardStateFilter })
-                  }
-                >
-                  <option value="all">All</option>
-                  <option value="open">Open</option>
-                  <option value="closed">Closed</option>
-                </BoardSelect>
-                <BoardSelect
-                  label="Assignee"
-                  value={filters.assignee ?? ""}
-                  onChange={(value) =>
-                    setFilterState({ ...filters, assignee: value === "" ? null : value })
-                  }
-                >
-                  <option value="">All assignees</option>
-                  {facets.assignees.map((login) => (
-                    <option key={login} value={login}>
-                      {login}
-                    </option>
-                  ))}
-                </BoardSelect>
-              </>
-            )}
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              aria-label="Refresh board"
-              disabled={repos.length === 0 || pending}
-              onClick={() => boardAtoms.forEach((atom) => registry.refresh(atom))}
-            >
-              <RefreshIcon size="md" refreshing={pending} />
-            </Button>
-          </div>
+        <WorkspacePageHeader electron={isElectron}>
+          <WorkspaceBreadcrumb ariaLabel="Board breadcrumb">
+            <WorkspaceBreadcrumbItem current>
+              <h1>Board</h1>
+            </WorkspaceBreadcrumbItem>
+          </WorkspaceBreadcrumb>
         </WorkspacePageHeader>
+        <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 px-5 py-2 sm:px-6">
+          {loaded.length === 0 ? null : (
+            <div className="flex items-center gap-1.5">
+              <input
+                type="search"
+                value={cardSearch}
+                placeholder="Search cards"
+                aria-label="Search cards by number, title, repository, label, assignee or text"
+                onChange={(event) => setCardSearch(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") setCardSearch("");
+                }}
+                className="h-8 w-48 rounded-md border border-input bg-background px-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              />
+              {cardSearch === "" ? null : (
+                <>
+                  <span className="text-xs tabular-nums text-muted-foreground">
+                    {columns.reduce((total, column) => total + column.items.length, 0)} found
+                  </span>
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    aria-label="Clear search"
+                    onClick={() => setCardSearch("")}
+                  >
+                    Clear
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
+          {boardRepos.length === 0 ? null : (
+            <Menu>
+              <MenuTrigger render={<Button variant="outline" size="sm" />}>
+                Repositories ({activeKeys.size}/{boardRepos.length})
+              </MenuTrigger>
+              <MenuPopup align="end" side="bottom">
+                {boardRepos.map((repo) => (
+                  <MenuCheckboxItem
+                    key={repo.key}
+                    checked={activeKeys.has(repo.key)}
+                    onCheckedChange={(next) =>
+                      pickRepositories(
+                        next
+                          ? [...activeKeys, repo.key]
+                          : [...activeKeys].filter((key) => key !== repo.key),
+                      )
+                    }
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span
+                        aria-hidden
+                        className={cn(
+                          "size-2 shrink-0 rounded-full",
+                          repositoryAccent(repo.label).dot,
+                        )}
+                      />
+                      <ProjectFavicon project={repo.project} className="size-3.5 shrink-0" />
+                      <span className="min-w-0 truncate">{repo.label}</span>
+                    </span>
+                  </MenuCheckboxItem>
+                ))}
+              </MenuPopup>
+            </Menu>
+          )}
+          {loaded.length === 0 ? null : (
+            <>
+              <BoardSelect
+                label="Label"
+                value={filters.label ?? ""}
+                onChange={(value) =>
+                  setFilterState({ ...filters, label: value === "" ? null : value })
+                }
+              >
+                <option value="">All labels</option>
+                {facets.labels.map((label) => (
+                  <option key={label} value={label}>
+                    {label}
+                  </option>
+                ))}
+              </BoardSelect>
+              <BoardSelect
+                label="State"
+                value={filters.state}
+                onChange={(value) =>
+                  setFilterState({ ...filters, state: value as BoardStateFilter })
+                }
+              >
+                <option value="all">All</option>
+                <option value="open">Open</option>
+                <option value="closed">Closed</option>
+              </BoardSelect>
+              <BoardSelect
+                label="Assignee"
+                value={filters.assignee ?? ""}
+                onChange={(value) =>
+                  setFilterState({ ...filters, assignee: value === "" ? null : value })
+                }
+              >
+                <option value="">All assignees</option>
+                {facets.assignees.map((login) => (
+                  <option key={login} value={login}>
+                    {login}
+                  </option>
+                ))}
+              </BoardSelect>
+            </>
+          )}
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label="Refresh board"
+            disabled={repos.length === 0 || pending}
+            onClick={() => boardAtoms.forEach((atom) => registry.refresh(atom))}
+          >
+            <RefreshIcon size="md" refreshing={pending} />
+          </Button>
+        </div>
         <div className="min-h-0 flex-1 overflow-auto px-5 pb-6 pt-2 sm:px-6">{body}</div>
       </div>
     </SidebarInset>
