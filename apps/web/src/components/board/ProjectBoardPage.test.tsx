@@ -9,6 +9,8 @@ const state = vi.hoisted(() => ({
   move: vi.fn(),
   close: vi.fn(),
   openDraft: vi.fn(),
+  start: vi.fn(),
+  createWorktree: vi.fn(),
   refresh: vi.fn(),
   toast: vi.fn(),
 }));
@@ -74,6 +76,12 @@ vi.mock("../../state/use-atom-command", () => ({ useAtomCommand: (command: unkno
 vi.mock("../../hooks/useOpenDraftWithPrompt", () => ({
   useOpenDraftWithPrompt: () => state.openDraft,
 }));
+vi.mock("../../hooks/useStartThreadWithPrompt", () => ({
+  useStartThreadWithPrompt: () => ({
+    startThread: state.start,
+    createSharedWorktree: state.createWorktree,
+  }),
+}));
 vi.mock("../../env", () => ({ isElectron: false }));
 vi.mock("../../localApi", () => ({ readLocalApi: () => null }));
 vi.mock("../ui/toast", () => ({ toastManager: { add: state.toast } }));
@@ -107,30 +115,29 @@ vi.mock("../pullRequest/pullRequestPresentation", () => ({
 }));
 vi.mock("./BoardThreadSetup", () => ({
   BoardThreadSetup: ({
-    onCreate,
+    onSubmit,
   }: {
-    onCreate: (options: Map<EnvironmentId, unknown>) => void;
-  }) => (
-    <button
-      onClick={() =>
-        onCreate(
-          new Map([
-            [
-              environmentId,
-              {
-                modelSelection: { instanceId: "codex", model: "shared-model" },
-                envMode: "worktree",
-                branch: "main",
-                startFromOrigin: true,
-              },
-            ],
-          ]),
-        )
-      }
-    >
-      Create separate drafts
-    </button>
-  ),
+    onSubmit: (options: Map<EnvironmentId, unknown>, start: boolean) => void;
+  }) => {
+    const options = new Map([
+      [
+        environmentId,
+        {
+          modelSelection: { instanceId: "codex", model: "shared-model" },
+          envMode: "worktree",
+          branch: "main",
+          startFromOrigin: true,
+          runtimeMode: "full-access",
+        },
+      ],
+    ]);
+    return (
+      <>
+        <button onClick={() => onSubmit(options, false)}>Open as draft</button>
+        <button onClick={() => onSubmit(options, true)}>Start</button>
+      </>
+    );
+  },
 }));
 
 import { ProjectBoardPage } from "./ProjectBoardPage";
@@ -151,6 +158,8 @@ beforeEach(async () => {
   state.move.mockReset().mockResolvedValue(AsyncResult.success(undefined));
   state.close.mockReset().mockResolvedValue(AsyncResult.success(undefined));
   state.openDraft.mockReset().mockResolvedValue(true);
+  state.start.mockReset().mockResolvedValue(true);
+  state.createWorktree.mockReset().mockResolvedValue({ branch: "tmp", path: "/work/tmp" });
   state.refresh.mockClear();
   state.toast.mockClear();
   await act(async () => {
@@ -221,20 +230,37 @@ describe("board batch actions", () => {
     expect(state.toast).toHaveBeenCalledTimes(1);
   });
 
-  it("asks how to group cards and combines both issues in one normal draft", async () => {
+  const chooseGrouping = async (value: "one" | "separate") => {
+    await act(async () => {
+      view.root
+        .findAllByType("select")
+        .find((node) => node.props.value === "one")!
+        .props.onChange({ target: { value } });
+    });
+  };
+  const chosenOptions = {
+    modelSelection: { instanceId: "codex", model: "shared-model" },
+    envMode: "worktree",
+    branch: "main",
+    startFromOrigin: true,
+    runtimeMode: "full-access",
+  };
+
+  it("opens both issues in one draft by default", async () => {
     await selectBoth();
     await act(async () => {
       button("Start threads").props.onClick();
     });
     expect(state.openDraft).not.toHaveBeenCalled();
     await act(async () => {
-      button("One thread").props.onClick();
+      button("Open as draft").props.onClick();
     });
     expect(state.openDraft).toHaveBeenCalledTimes(1);
-    const [project, prompt] = state.openDraft.mock.calls[0]!;
+    const [project, prompt, options] = state.openDraft.mock.calls[0]!;
     expect(project).toEqual({ environmentId, projectId });
     expect(prompt).toContain("https://github.com/acme/web/issues/1");
     expect(prompt).toContain("https://github.com/acme/web/issues/2");
+    expect(options).toEqual(chosenOptions);
   });
 
   it("opens one draft per issue using the same shared setup", async () => {
@@ -242,12 +268,9 @@ describe("board batch actions", () => {
     await act(async () => {
       button("Start threads").props.onClick();
     });
+    await chooseGrouping("separate");
     await act(async () => {
-      button("Separate threads").props.onClick();
-    });
-    expect(state.openDraft).not.toHaveBeenCalled();
-    await act(async () => {
-      button("Create separate drafts").props.onClick();
+      button("Open as draft").props.onClick();
     });
     expect(state.openDraft).toHaveBeenCalledTimes(2);
     const first = state.openDraft.mock.calls[0]!;
@@ -256,12 +279,63 @@ describe("board batch actions", () => {
     expect(first[1]).not.toContain("issues/2");
     expect(second[1]).toContain("issues/2");
     expect(second[1]).not.toContain("issues/1");
-    expect(first[2]).toEqual({
-      modelSelection: { instanceId: "codex", model: "shared-model" },
-      envMode: "worktree",
-      branch: "main",
-      startFromOrigin: true,
-    });
+    expect(first[2]).toEqual(chosenOptions);
     expect(second[2]).toEqual(first[2]);
+  });
+
+  it("starts one thread for both issues right away", async () => {
+    await selectBoth();
+    await act(async () => {
+      button("Start threads").props.onClick();
+    });
+    await act(async () => {
+      button("Start").props.onClick();
+    });
+    expect(state.openDraft).not.toHaveBeenCalled();
+    expect(state.start).toHaveBeenCalledTimes(1);
+    const [input] = state.start.mock.calls[0]!;
+    expect(input.title).toBe("First +1");
+    expect(input.prompt).toContain("issues/1");
+    expect(input.prompt).toContain("issues/2");
+    expect(input.open).toBe(true);
+    expect(input.shared).toBeUndefined();
+    expect(checkbox("First").props.checked).toBe(false);
+  });
+
+  it("starts a thread per issue in their own worktrees, or in one shared worktree", async () => {
+    await selectBoth();
+    await act(async () => {
+      button("Start threads").props.onClick();
+    });
+    await chooseGrouping("separate");
+    await act(async () => {
+      button("Start").props.onClick();
+    });
+    expect(state.createWorktree).not.toHaveBeenCalled();
+    expect(state.start.mock.calls.map(([call]) => [call.title, call.shared, call.open])).toEqual([
+      ["First", undefined, false],
+      ["Second", undefined, false],
+    ]);
+
+    await selectBoth();
+    await act(async () => {
+      button("Start threads").props.onClick();
+    });
+    await chooseGrouping("separate");
+    await act(async () => {
+      view.root
+        .findAllByType("select")
+        .find((node) => node.props.value === "each")!
+        .props.onChange({ target: { value: "shared" } });
+    });
+    state.start.mockClear();
+    await act(async () => {
+      button("Start").props.onClick();
+    });
+    expect(state.createWorktree).toHaveBeenCalledTimes(1);
+    expect(state.start.mock.calls.map(([call]) => call.shared)).toEqual([
+      { branch: "tmp", path: "/work/tmp", setup: true },
+      { branch: "tmp", path: "/work/tmp", setup: false },
+    ]);
   });
 });

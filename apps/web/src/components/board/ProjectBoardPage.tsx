@@ -15,10 +15,12 @@ import * as Schema from "effect/Schema";
 import { useContext, useDeferredValue, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { isElectron } from "../../env";
+import { useOpenDraftWithPrompt } from "../../hooks/useOpenDraftWithPrompt";
 import {
-  useOpenDraftWithPrompt,
-  type DraftPromptOptions,
-} from "../../hooks/useOpenDraftWithPrompt";
+  useStartThreadWithPrompt,
+  type SharedWorktree,
+  type StartThreadOptions,
+} from "../../hooks/useStartThreadWithPrompt";
 import { cn } from "../../lib/utils";
 import { readLocalApi } from "../../localApi";
 import { useAllEnvironmentShellsBootstrapped, useProjects } from "../../state/entities";
@@ -36,7 +38,6 @@ import { Checkbox } from "../ui/checkbox";
 import {
   Dialog,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogPanel,
   DialogPopup,
@@ -197,6 +198,7 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
     reportFailure: false,
   });
   const openDraftWithPrompt = useOpenDraftWithPrompt();
+  const { startThread: startThreadNow, createSharedWorktree } = useStartThreadWithPrompt();
   const setIssueState = useAtomCommand(sourceControlEnvironment.setProjectBoardIssueState, {
     reportFailure: false,
   });
@@ -255,7 +257,8 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
   const actionRunning = useRef(false);
   const [threadItems, setThreadItems] = useState<ReadonlyArray<BoardCardItem>>([]);
   const [threadRepoKey, setThreadRepoKey] = useState("");
-  const [separateSetup, setSeparateSetup] = useState(false);
+  const [grouping, setGrouping] = useState<"one" | "separate">("one");
+  const [sharedWorktree, setSharedWorktree] = useState(false);
   const toggleSelected = (item: BoardCardItem, checked: boolean) => {
     setSelected((current) => {
       const next = new Set(current);
@@ -361,40 +364,59 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
     return true;
   };
 
-  const startThread = async (item: BoardCardItem, options?: DraftPromptOptions) => {
-    const repo = repoOf(item.repoKey);
-    if (repo === undefined) return;
-    const opened = await openDraftWithPrompt(
-      scopeProjectRef(repo.project.environmentId, repo.project.id),
-      startThreadPrompt(item),
-      options,
-    );
-    if (!opened) {
-      toastManager.add({ type: "error", title: "Could not open a new thread" });
-    }
-    return opened;
+  const openThreadSetup = (items: ReadonlyArray<BoardCardItem>) => {
+    setThreadRepoKey(items[0]!.repoKey);
+    setGrouping("one");
+    setSharedWorktree(false);
+    setThreadItems(items);
   };
 
-  const startSelectedThreads = async (options?: ReadonlyMap<EnvironmentId, DraftPromptOptions>) => {
+  /** Runs the dialog's choice: one thread for all cards or one each, now or as drafts. */
+  const submitThreads = async (
+    options: ReadonlyMap<EnvironmentId, StartThreadOptions>,
+    start: boolean,
+  ) => {
     const items = threadItems;
-    const repo = repoOf(threadRepoKey);
-    if (actionRunning.current || items.length === 0 || repo === undefined) return;
+    if (actionRunning.current || items.length === 0) return;
     setThreadItems([]);
+    const combined = grouping === "one";
+    const worktrees = new Map<string, SharedWorktree | null>();
     await runBatch(
-      options ? items : items.slice(0, 1),
+      combined ? items.slice(0, 1) : items,
       async (item) => {
-        if (options) {
-          const itemRepo = repoOf(item.repoKey);
-          return itemRepo
-            ? ((await startThread(item, options.get(itemRepo.project.environmentId))) ?? false)
-            : false;
+        const group = combined ? items : [item];
+        const repo = repoOf(combined ? threadRepoKey : item.repoKey);
+        const threadOptions = repo && options.get(repo.project.environmentId);
+        if (!repo || !threadOptions) return false;
+        const prompt = group.map(startThreadPrompt).join("\n\n");
+        let opened: boolean;
+        if (start) {
+          let shared: (SharedWorktree & { readonly setup: boolean }) | undefined;
+          if (!combined && sharedWorktree && threadOptions.envMode === "worktree") {
+            const known = worktrees.has(repo.key);
+            if (!known)
+              worktrees.set(repo.key, await createSharedWorktree(repo.project, threadOptions));
+            const tree = worktrees.get(repo.key);
+            if (!tree) return false;
+            shared = { ...tree, setup: !known };
+          }
+          opened = await startThreadNow({
+            project: repo.project,
+            prompt,
+            title: group.length === 1 ? item.title : `${item.title} +${group.length - 1}`,
+            options: threadOptions,
+            ...(shared ? { shared } : {}),
+            open: combined || items.length === 1,
+          });
+        } else {
+          opened = await openDraftWithPrompt(
+            scopeProjectRef(repo.project.environmentId, repo.project.id),
+            prompt,
+            threadOptions,
+          );
+          if (!opened) toastManager.add({ type: "error", title: "Could not open a new thread" });
         }
-        const opened = await openDraftWithPrompt(
-          scopeProjectRef(repo.project.environmentId, repo.project.id),
-          items.map(startThreadPrompt).join("\n\n"),
-        );
-        if (opened) items.forEach((entry) => toggleSelected(entry, false));
-        else toastManager.add({ type: "error", title: "Could not open a new thread" });
+        if (opened) group.forEach((entry) => toggleSelected(entry, false));
         return opened;
       },
       false,
@@ -497,19 +519,7 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
                 size="sm"
                 variant="outline"
                 disabled={busy}
-                onClick={() => {
-                  if (selectedItems.length === 1) {
-                    void runBatch(
-                      selectedItems,
-                      async (item) => (await startThread(item)) ?? false,
-                      false,
-                    );
-                    return;
-                  }
-                  setThreadRepoKey(selectedItems[0]!.repoKey);
-                  setSeparateSetup(false);
-                  setThreadItems(selectedItems);
-                }}
+                onClick={() => openThreadSetup(selectedItems)}
               >
                 Start thread{selectedItems.length > 1 ? "s" : ""}
               </Button>
@@ -553,7 +563,7 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
                 setOverKey(null);
                 void runBatch(draggedItems(itemId), (item) => dropOnColumn(item, column.key));
               }}
-              onStartThread={(item) => void startThread(item)}
+              onStartThread={(item) => openThreadSetup([item])}
               selected={selected}
               busy={busy}
               onSelect={toggleSelected}
@@ -574,46 +584,63 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
       >
         <DialogPopup>
           <DialogHeader>
-            <DialogTitle>Start threads for {threadItems.length} cards</DialogTitle>
+            <DialogTitle>
+              Start{" "}
+              {threadItems.length === 1 ? "thread" : `threads for ${threadItems.length} cards`}
+            </DialogTitle>
             <DialogDescription>
-              {separateSetup
-                ? "Choose the model and workspace once for all drafts in each environment. New worktrees are created separately when you send each thread."
-                : "Combine the cards in one thread, or open a separate draft for each."}
+              Choose the model, thinking level and workspace. Start runs the threads now; a draft
+              opens them for review first.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel>
-            {!separateSetup && new Set(threadItems.map((item) => item.repoKey)).size > 1 ? (
-              <BoardSelect
-                label="Project for combined thread"
-                value={threadRepoKey}
-                onChange={setThreadRepoKey}
-              >
-                {repos
-                  .filter((repo) => threadItems.some((item) => item.repoKey === repo.key))
-                  .map((repo) => (
-                    <option key={repo.key} value={repo.key}>
-                      {repo.label}
-                    </option>
-                  ))}
-              </BoardSelect>
-            ) : null}
-            {separateSetup ? (
+            <div className="flex flex-col gap-4">
+              {threadItems.length > 1 ? (
+                <div className="flex flex-wrap items-center gap-3">
+                  <BoardSelect
+                    label="Threads"
+                    value={grouping}
+                    onChange={(value) => setGrouping(value === "separate" ? "separate" : "one")}
+                  >
+                    <option value="one">One thread for all cards</option>
+                    <option value="separate">One thread per card</option>
+                  </BoardSelect>
+                  {grouping === "one" &&
+                  new Set(threadItems.map((item) => item.repoKey)).size > 1 ? (
+                    <BoardSelect label="Project" value={threadRepoKey} onChange={setThreadRepoKey}>
+                      {repos
+                        .filter((repo) => threadItems.some((item) => item.repoKey === repo.key))
+                        .map((repo) => (
+                          <option key={repo.key} value={repo.key}>
+                            {repo.label}
+                          </option>
+                        ))}
+                    </BoardSelect>
+                  ) : null}
+                  {grouping === "separate" ? (
+                    <BoardSelect
+                      label="New worktrees"
+                      value={sharedWorktree ? "shared" : "each"}
+                      onChange={(value) => setSharedWorktree(value === "shared")}
+                    >
+                      <option value="each">One per thread</option>
+                      <option value="shared">Shared per repository</option>
+                    </BoardSelect>
+                  ) : null}
+                </div>
+              ) : null}
               <BoardThreadSetup
                 projects={repos
-                  .filter((repo) => threadItems.some((item) => item.repoKey === repo.key))
+                  .filter((repo) =>
+                    grouping === "one"
+                      ? repo.key === threadRepoKey
+                      : threadItems.some((item) => item.repoKey === repo.key),
+                  )
                   .map((repo) => repo.project)}
-                onCreate={(options) => void startSelectedThreads(options)}
+                onSubmit={(options, start) => void submitThreads(options, start)}
               />
-            ) : null}
+            </div>
           </DialogPanel>
-          {separateSetup ? null : (
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setSeparateSetup(true)}>
-                Separate threads
-              </Button>
-              <Button onClick={() => void startSelectedThreads()}>One thread</Button>
-            </DialogFooter>
-          )}
         </DialogPopup>
       </Dialog>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">

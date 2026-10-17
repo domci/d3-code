@@ -22,10 +22,12 @@ Open **Board** in the sidebar to work with GitHub Projects linked to your reposi
 cards to move them together by dragging a selected card to another status, or use **Move to**.
 You can also close or reopen selected issues. Failed actions leave their cards selected for retry.
 
-**Start threads** lets you combine selected cards in one draft or create a separate draft for
-each. A combined draft uses the normal composer setup. Separate drafts share the model and
-workspace settings you choose, with one setup per environment. Each new worktree is created
-when you send its draft. Drafts remain in the sidebar until you send or discard them.
+**Start thread** (or **Start threads** for a selection) asks for a model, thinking level, and
+workspace, with one setup per environment. **Start** runs the threads right away; **Open as
+draft** opens them for review first. With several cards, choose one thread for all of them or one
+per card. For one thread per card in a new worktree, the worktrees can be one per thread or shared
+by all threads of a repository. A shared worktree starts from the local base branch, or from
+`origin/<branch>` as last fetched when starting from origin is on.
 
 ### GitHub
 

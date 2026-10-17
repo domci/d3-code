@@ -6,10 +6,14 @@ import {
   ProjectId,
   ProviderInstanceId,
 } from "@t3tools/contracts";
-import type { DraftPromptOptions } from "../../hooks/useOpenDraftWithPrompt";
+import type { StartThreadOptions } from "../../hooks/useStartThreadWithPrompt";
 
 const entries = [
-  { instanceId: ProviderInstanceId.make("codex"), models: [{ slug: "default", isLegacy: false }] },
+  {
+    instanceId: ProviderInstanceId.make("codex"),
+    driverKind: "codex",
+    models: [{ slug: "default", isLegacy: false }],
+  },
 ];
 vi.mock("@effect/atom-react", () => ({ useAtomValue: () => [] }));
 vi.mock("../../hooks/useSettings", () => ({
@@ -26,6 +30,7 @@ vi.mock("../../providerInstances", () => ({
 }));
 vi.mock("../../modelSelection", () => ({ getCustomModelOptionsByInstance: () => new Map() }));
 vi.mock("../chat/ProviderModelPicker", () => ({ ProviderModelPicker: "input" }));
+vi.mock("../chat/TraitsPicker", () => ({ TraitsPicker: "output" }));
 vi.mock("../WorktreeBaseBranchPicker", () => ({ WorktreeBaseBranchPicker: "textarea" }));
 vi.mock("../ui/button", () => ({ Button: "button" }));
 
@@ -37,7 +42,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-it("collects one editable setup per environment for all selected projects", async () => {
+it("collects one editable setup per environment, with a thinking level, and starts or drafts", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const env = EnvironmentId.make("server");
   const remote = EnvironmentId.make("remote");
@@ -51,9 +56,10 @@ it("collects one editable setup per environment for all selected projects", asyn
     createdAt: "2026-10-15T00:00:00.000Z",
     updatedAt: "2026-10-15T00:00:00.000Z",
   }));
-  const createDrafts = vi.fn<(options: ReadonlyMap<EnvironmentId, DraftPromptOptions>) => void>();
+  const submit =
+    vi.fn<(options: ReadonlyMap<EnvironmentId, StartThreadOptions>, start: boolean) => void>();
   await act(async () => {
-    view = create(<BoardThreadSetup projects={projects} onCreate={createDrafts} />);
+    view = create(<BoardThreadSetup projects={projects} onSubmit={submit} />);
   });
   expect(view!.root.findAllByType("fieldset")).toHaveLength(2);
   const first = view!.root.findAllByType("fieldset")[0]!;
@@ -66,15 +72,27 @@ it("collects one editable setup per environment for all selected projects", asyn
     first.findByType("textarea").props.onStartFromOriginChange(true);
   });
   await act(async () => {
-    view!.root.findByType("button").props.onClick();
+    first.findByType("output").props.onModelOptionsChange([{ id: "effort", value: "high" }]);
   });
-  const options = createDrafts.mock.calls[0]![0];
+  const button = (label: string) =>
+    view!.root.findAllByType("button").find((node) => node.children.join("") === label)!;
+  await act(async () => {
+    button("Open as draft").props.onClick();
+    button("Start").props.onClick();
+  });
+  expect(submit.mock.calls.map(([, start]) => start)).toEqual([false, true]);
+  const options = submit.mock.calls[1]![0];
   expect(options.size).toBe(2);
   expect(options.get(env)).toEqual({
-    modelSelection: { instanceId: "codex", model: "chosen-model" },
+    modelSelection: {
+      instanceId: "codex",
+      model: "chosen-model",
+      options: [{ id: "effort", value: "high" }],
+    },
     envMode: "worktree",
     branch: "release",
     startFromOrigin: true,
+    runtimeMode: DEFAULT_SERVER_SETTINGS.defaultRuntimeMode,
   });
   expect(options.get(remote)?.modelSelection.model).toBe("default");
 });
