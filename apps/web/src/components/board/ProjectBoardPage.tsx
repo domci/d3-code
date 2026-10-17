@@ -258,7 +258,6 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
   const [threadItems, setThreadItems] = useState<ReadonlyArray<BoardCardItem>>([]);
   const [threadRepoKey, setThreadRepoKey] = useState("");
   const [grouping, setGrouping] = useState<"one" | "separate">("one");
-  const [sharedWorktree, setSharedWorktree] = useState(false);
   const toggleSelected = (item: BoardCardItem, checked: boolean) => {
     setSelected((current) => {
       const next = new Set(current);
@@ -367,7 +366,6 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
   const openThreadSetup = (items: ReadonlyArray<BoardCardItem>) => {
     setThreadRepoKey(items[0]!.repoKey);
     setGrouping("one");
-    setSharedWorktree(false);
     setThreadItems(items);
   };
 
@@ -392,7 +390,7 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
         let opened: boolean;
         if (start) {
           let shared: (SharedWorktree & { readonly setup: boolean }) | undefined;
-          if (!combined && sharedWorktree && threadOptions.envMode === "worktree") {
+          if (!combined && threadOptions.sharedWorktree) {
             const known = worktrees.has(repo.key);
             if (!known)
               worktrees.set(repo.key, await createSharedWorktree(repo.project, threadOptions));
@@ -617,19 +615,10 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
                         ))}
                     </BoardSelect>
                   ) : null}
-                  {grouping === "separate" ? (
-                    <BoardSelect
-                      label="New worktrees"
-                      value={sharedWorktree ? "shared" : "each"}
-                      onChange={(value) => setSharedWorktree(value === "shared")}
-                    >
-                      <option value="each">One per thread</option>
-                      <option value="shared">Shared per repository</option>
-                    </BoardSelect>
-                  ) : null}
                 </div>
               ) : null}
               <BoardThreadSetup
+                canShareWorktree={grouping === "separate"}
                 projects={repos
                   .filter((repo) =>
                     grouping === "one"

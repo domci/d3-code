@@ -59,13 +59,13 @@ it("collects one editable setup per environment, with a thinking level, and star
   const submit =
     vi.fn<(options: ReadonlyMap<EnvironmentId, StartThreadOptions>, start: boolean) => void>();
   await act(async () => {
-    view = create(<BoardThreadSetup projects={projects} onSubmit={submit} />);
+    view = create(<BoardThreadSetup projects={projects} canShareWorktree onSubmit={submit} />);
   });
   expect(view!.root.findAllByType("fieldset")).toHaveLength(2);
   const first = view!.root.findAllByType("fieldset")[0]!;
   await act(async () => {
     first.findByType("input").props.onInstanceModelChange("codex", "chosen-model");
-    first.findByType("select").props.onChange({ target: { value: "worktree" } });
+    first.findByType("select").props.onChange({ target: { value: "shared" } });
   });
   await act(async () => {
     first.findByType("textarea").props.onValueChange("release");
@@ -93,6 +93,8 @@ it("collects one editable setup per environment, with a thinking level, and star
     branch: "release",
     startFromOrigin: true,
     runtimeMode: DEFAULT_SERVER_SETTINGS.defaultRuntimeMode,
+    sharedWorktree: true,
   });
+  expect(options.get(remote)?.sharedWorktree).toBe(false);
   expect(options.get(remote)?.modelSelection.model).toBe("default");
 });

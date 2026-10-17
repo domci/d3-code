@@ -119,22 +119,25 @@ vi.mock("./BoardThreadSetup", () => ({
   }: {
     onSubmit: (options: Map<EnvironmentId, unknown>, start: boolean) => void;
   }) => {
-    const options = new Map([
-      [
-        environmentId,
-        {
-          modelSelection: { instanceId: "codex", model: "shared-model" },
-          envMode: "worktree",
-          branch: "main",
-          startFromOrigin: true,
-          runtimeMode: "full-access",
-        },
-      ],
-    ]);
+    const setup = (sharedWorktree: boolean) =>
+      new Map([
+        [
+          environmentId,
+          {
+            modelSelection: { instanceId: "codex", model: "shared-model" },
+            envMode: "worktree",
+            branch: "main",
+            startFromOrigin: true,
+            runtimeMode: "full-access",
+            sharedWorktree,
+          },
+        ],
+      ]);
     return (
       <>
-        <button onClick={() => onSubmit(options, false)}>Open as draft</button>
-        <button onClick={() => onSubmit(options, true)}>Start</button>
+        <button onClick={() => onSubmit(setup(false), false)}>Open as draft</button>
+        <button onClick={() => onSubmit(setup(false), true)}>Start</button>
+        <button onClick={() => onSubmit(setup(true), true)}>Start shared</button>
       </>
     );
   },
@@ -244,6 +247,7 @@ describe("board batch actions", () => {
     branch: "main",
     startFromOrigin: true,
     runtimeMode: "full-access",
+    sharedWorktree: false,
   };
 
   it("opens both issues in one draft by default", async () => {
@@ -322,15 +326,9 @@ describe("board batch actions", () => {
       button("Start threads").props.onClick();
     });
     await chooseGrouping("separate");
-    await act(async () => {
-      view.root
-        .findAllByType("select")
-        .find((node) => node.props.value === "each")!
-        .props.onChange({ target: { value: "shared" } });
-    });
     state.start.mockClear();
     await act(async () => {
-      button("Start").props.onClick();
+      button("Start shared").props.onClick();
     });
     expect(state.createWorktree).toHaveBeenCalledTimes(1);
     expect(state.start.mock.calls.map(([call]) => call.shared)).toEqual([

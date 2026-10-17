@@ -1,6 +1,6 @@
 import {
-  ArrowLeftIcon,
   ChartNoAxesColumnIcon,
+  CodeXmlIcon,
   KanbanIcon,
   MoonIcon,
   SettingsIcon,
@@ -176,18 +176,28 @@ function SidebarBrandMark({ onBackdrop }: { onBackdrop: boolean }) {
 function SidebarUtilityItem({
   icon,
   label,
+  active,
+  className,
   onClick,
 }: {
   icon: ReactNode;
   label: string;
+  active: boolean;
+  className?: string;
   onClick: () => void;
 }) {
   return (
-    <SidebarMenuItem className="shrink-0">
+    <SidebarMenuItem className={cn("shrink-0", className)}>
       <Tooltip>
         <TooltipTrigger
           render={
-            <SidebarMenuButton aria-label={label} onClick={onClick} size="icon">
+            <SidebarMenuButton
+              aria-label={label}
+              aria-current={active ? "page" : undefined}
+              isActive={active}
+              onClick={onClick}
+              size="icon"
+            >
               {icon}
             </SidebarMenuButton>
           }
@@ -202,9 +212,12 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const navigate = useNavigate();
   const navigateToMainApp = useNavigateToMainApp();
   const { isMobile, setOpenMobile } = useSidebar();
-  const isOnUtilityPage = useLocation({
-    select: (location) => isSidebarUtilityPage(location.pathname),
-  });
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const isSettings = pathname.startsWith("/settings") || pathname.startsWith("/projects/");
+  const isPullRequests = pathname === "/pull-requests";
+  const isBoard = pathname === "/board";
+  const isUsage = pathname === "/usage";
+  const isCode = !isSidebarUtilityPage(pathname);
   const pullRequestsSupported = usePullRequestsSupported();
   const closeMobileSidebar = useCallback(() => {
     if (isMobile) {
@@ -241,35 +254,39 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
 
   return (
     <SidebarMenu className="flex-row items-center">
-      {isOnUtilityPage ? (
-        <SidebarMenuItem className="min-w-0 flex-1">
-          <SidebarMenuButton onClick={handleBackClick}>
-            <ArrowLeftIcon />
-            <span>Back</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      ) : (
-        <>
-          <SidebarUtilityItem
-            icon={<SettingsIcon />}
-            label="Settings"
-            onClick={handleSettingsClick}
-          />
-          {pullRequestsSupported ? (
-            <SidebarUtilityItem
-              icon={<PullRequestGlyph.pullRequest />}
-              label="Pull Requests"
-              onClick={handlePullRequestsClick}
-            />
-          ) : null}
-          <SidebarUtilityItem icon={<KanbanIcon />} label="Board" onClick={handleBoardClick} />
-          <SidebarUtilityItem
-            icon={<ChartNoAxesColumnIcon />}
-            label="Usage"
-            onClick={handleUsageClick}
-          />
-        </>
-      )}
+      <SidebarUtilityItem
+        icon={<CodeXmlIcon />}
+        label="Threads"
+        active={isCode}
+        onClick={handleBackClick}
+      />
+      {pullRequestsSupported ? (
+        <SidebarUtilityItem
+          icon={<PullRequestGlyph.pullRequest />}
+          label="Pull Requests"
+          active={isPullRequests}
+          onClick={handlePullRequestsClick}
+        />
+      ) : null}
+      <SidebarUtilityItem
+        icon={<KanbanIcon />}
+        label="Board"
+        active={isBoard}
+        onClick={handleBoardClick}
+      />
+      <SidebarUtilityItem
+        icon={<ChartNoAxesColumnIcon />}
+        label="Usage"
+        active={isUsage}
+        onClick={handleUsageClick}
+      />
+      <SidebarUtilityItem
+        icon={<SettingsIcon />}
+        label="Settings"
+        active={isSettings}
+        className="ml-auto"
+        onClick={handleSettingsClick}
+      />
       <SidebarUpdatePill />
     </SidebarMenu>
   );

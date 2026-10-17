@@ -27,6 +27,8 @@ type Project = ReturnType<typeof useProjects>[number];
  */
 export function BoardThreadSetup(props: {
   readonly projects: ReadonlyArray<Project>;
+  /** Offers one worktree shared by the threads of a repository. */
+  readonly canShareWorktree: boolean;
   readonly onSubmit: (
     options: ReadonlyMap<EnvironmentId, StartThreadOptions>,
     start: boolean,
@@ -42,7 +44,12 @@ export function BoardThreadSetup(props: {
   return (
     <div className="flex flex-col gap-4">
       {environments.map((project) => (
-        <EnvironmentSetup key={project.environmentId} project={project} onChange={changeOptions} />
+        <EnvironmentSetup
+          key={project.environmentId}
+          project={project}
+          canShareWorktree={props.canShareWorktree}
+          onChange={changeOptions}
+        />
       ))}
       <div className="flex justify-end gap-2">
         <Button
@@ -65,9 +72,11 @@ export function BoardThreadSetup(props: {
 
 function EnvironmentSetup({
   project,
+  canShareWorktree,
   onChange,
 }: {
   readonly project: Project;
+  readonly canShareWorktree: boolean;
   readonly onChange: (environmentId: EnvironmentId, value: StartThreadOptions) => void;
 }) {
   const settings = useEnvironmentSettings(project.environmentId);
@@ -98,9 +107,11 @@ function EnvironmentSetup({
       )[0],
     [selection, defaults.defaultModelSelection, entries],
   );
-  const [envMode, setEnvMode] = useState<"local" | "worktree">(
+  const [workspace, setWorkspace] = useState<"local" | "worktree" | "shared">(
     defaults.defaultThreadEnvMode ?? "worktree",
   );
+  const sharedWorktree = canShareWorktree && workspace === "shared";
+  const envMode = workspace === "local" ? "local" : "worktree";
   const [branch, setBranch] = useState("");
   const [startFromOrigin, setStartFromOrigin] = useState(defaults.newWorktreesStartFromOrigin);
   const activeEntry = entries.find((entry) => entry.instanceId === active?.instanceId);
@@ -119,10 +130,12 @@ function EnvironmentSetup({
         branch: branch || null,
         startFromOrigin,
         runtimeMode: defaults.defaultRuntimeMode,
+        sharedWorktree,
       });
   }, [
     active,
     envMode,
+    sharedWorktree,
     branch,
     startFromOrigin,
     defaults.defaultRuntimeMode,
@@ -166,12 +179,23 @@ function EnvironmentSetup({
       <label className="flex items-center gap-2 text-sm">
         Workspace
         <select
-          value={envMode}
-          onChange={(event) => setEnvMode(event.target.value === "worktree" ? "worktree" : "local")}
+          value={workspace === "shared" && !canShareWorktree ? "worktree" : workspace}
+          onChange={(event) =>
+            setWorkspace(
+              event.target.value === "shared"
+                ? "shared"
+                : event.target.value === "worktree"
+                  ? "worktree"
+                  : "local",
+            )
+          }
           className="h-8 rounded-md border border-input bg-background px-2 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         >
           <option value="local">Project checkout</option>
           <option value="worktree">New worktree per thread</option>
+          {canShareWorktree ? (
+            <option value="shared">One shared worktree per repository</option>
+          ) : null}
         </select>
       </label>
       {envMode === "worktree" ? (

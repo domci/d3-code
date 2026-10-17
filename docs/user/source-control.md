@@ -25,8 +25,8 @@ You can also close or reopen selected issues. Failed actions leave their cards s
 **Start thread** (or **Start threads** for a selection) asks for a model, thinking level, and
 workspace, with one setup per environment. **Start** runs the threads right away; **Open as
 draft** opens them for review first. With several cards, choose one thread for all of them or one
-per card. For one thread per card in a new worktree, the worktrees can be one per thread or shared
-by all threads of a repository. A shared worktree starts from the local base branch, or from
+per card. For one thread per card, the **Workspace** choice also offers one worktree shared by all
+threads of a repository. A shared worktree starts from the local base branch, or from
 `origin/<branch>` as last fetched when starting from origin is on.
 
 ### GitHub

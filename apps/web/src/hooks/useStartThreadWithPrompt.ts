@@ -20,6 +20,8 @@ import type { DraftPromptOptions } from "./useOpenDraftWithPrompt";
 
 export interface StartThreadOptions extends DraftPromptOptions {
   readonly runtimeMode: RuntimeMode;
+  /** Worktree mode only: the batch's threads share one worktree per repository. */
+  readonly sharedWorktree: boolean;
 }
 
 export interface StartThreadProject {
