@@ -258,14 +258,17 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
   const [threadItems, setThreadItems] = useState<ReadonlyArray<BoardCardItem>>([]);
   const [threadRepoKey, setThreadRepoKey] = useState("");
   const [grouping, setGrouping] = useState<"one" | "separate">("one");
-  const toggleSelected = (item: BoardCardItem, checked: boolean) => {
+  const selectItems = (items: ReadonlyArray<BoardCardItem>, checked: boolean) => {
     setSelected((current) => {
       const next = new Set(current);
-      if (checked) next.add(cardKey(item));
-      else next.delete(cardKey(item));
+      for (const item of items) {
+        if (checked) next.add(cardKey(item));
+        else next.delete(cardKey(item));
+      }
       return next;
     });
   };
+  const toggleSelected = (item: BoardCardItem, checked: boolean) => selectItems([item], checked);
   const draggedItems = (key: string) => {
     const card = visibleItems.find((item) => cardKey(item) === key);
     return card === undefined ? [] : selected.has(cardKey(card)) ? selectedItems : [card];
@@ -565,6 +568,7 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
               selected={selected}
               busy={busy}
               onSelect={toggleSelected}
+              onSelectColumn={selectItems}
             />
           ))}
         </div>
@@ -846,8 +850,10 @@ function BoardColumn(props: {
   readonly selected: ReadonlySet<string>;
   readonly busy: boolean;
   readonly onSelect: (item: BoardCardItem, checked: boolean) => void;
+  readonly onSelectColumn: (items: ReadonlyArray<BoardCardItem>, checked: boolean) => void;
 }) {
   const { column } = props;
+  const selectedCount = column.items.filter((item) => props.selected.has(cardKey(item))).length;
   return (
     <section
       aria-label={column.name}
@@ -868,6 +874,13 @@ function BoardColumn(props: {
       }}
     >
       <header className="flex items-center gap-2 px-1 text-sm font-medium">
+        <Checkbox
+          aria-label={`Select all in ${column.name}`}
+          checked={column.items.length > 0 && selectedCount === column.items.length}
+          indeterminate={selectedCount > 0 && selectedCount < column.items.length}
+          disabled={props.busy || column.items.length === 0}
+          onCheckedChange={(checked) => props.onSelectColumn(column.items, checked)}
+        />
         <span
           aria-hidden
           className={cn(

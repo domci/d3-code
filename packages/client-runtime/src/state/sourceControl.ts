@@ -1,4 +1,4 @@
-import { WS_METHODS } from "@t3tools/contracts";
+import { ProjectBoardResult, WS_METHODS } from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
 
 import {
@@ -9,6 +9,7 @@ import {
 } from "./runtime.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import * as Persistence from "../platform/persistence.ts";
+import { persistQuery } from "./queryPersistence.ts";
 import { vcsCommandConcurrency, vcsCommandScheduler } from "./vcsCommandScheduler.ts";
 import { invalidateCachedVcsRefs } from "./vcsRefInvalidation.ts";
 
@@ -27,6 +28,9 @@ export function createSourceControlEnvironmentAtoms<R, E>(
     }),
     projectBoard: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:source-control:project-board",
+      // A board takes up to ten sequential GitHub pages to read: show the last one at once and
+      // refresh behind it.
+      persistence: persistQuery(ProjectBoardResult),
       tag: WS_METHODS.sourceControlGetProjectBoard,
     }),
     moveProjectBoardItem: createEnvironmentRpcCommand(runtime, {
