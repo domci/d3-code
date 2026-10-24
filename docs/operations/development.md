@@ -15,6 +15,24 @@ a new browser.
 
 Prefer a container? See [Dev container](../internals/devcontainer.md) for VS Code and Codespaces setup.
 
+## Vendored references and dependency audits
+
+`.repos/effect-smol` and `.repos/alchemy-effect` are read-only upstream source
+references, not workspace packages or release inputs. Keep their manifests,
+lockfiles, and test fixtures intact: patching a copied fixture would lose upstream
+provenance without fixing the dependency the application actually installs.
+
+The authoritative update mapping is [`reference-repos.ts`](../../scripts/lib/reference-repos.ts).
+When changing Effect or Alchemy, use `vp run sync:repos --dry-run` to review the
+version-matched upstream tag, then `vp run sync:repos` to update the whole subtree.
+Do not use `--latest` merely to clear alerts. If a pinned tag is unavailable, keep
+and report the existing snapshot rather than substituting an unverified source.
+
+Audit the root `pnpm-lock.yaml` separately from the vendored graphs. A clean root
+audit does not clear alerts in the snapshots or their nested fixtures. Keep those
+findings visible and identify the upstream version that owns them; do not dismiss
+them in bulk or locally rewrite their lockfiles to make a security report green.
+
 ## Choosing a dev process
 
 Use `vp run dev` for server and web, or `vp run dev:desktop` for the Electron client.
