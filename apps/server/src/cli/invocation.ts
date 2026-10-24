@@ -48,7 +48,7 @@ const decodeInstallManifest = Schema.decodeUnknownEffect(Schema.fromJsonString(I
  * counts only when its package is this exact version: a different `t3` run
  * from an agent's shell must not claim to be the npm install.
  */
-const resolveEntryPath = Effect.gen(function* () {
+export const resolveEntryPath = Effect.gen(function* () {
   const npmLauncher = (yield* HostProcess.Environment).T3CODE_NPM_LAUNCHER_PATH?.trim();
   if (npmLauncher) {
     const fs = yield* FileSystem.FileSystem;
@@ -110,7 +110,7 @@ function suggestedPackageSpec(version: string): string {
   return channel === undefined ? "t3" : `t3@${channel}`;
 }
 
-export function formatCliCommand(input: {
+function formatCliCommand(input: {
   readonly subcommand: string;
   readonly entryPath: string;
   readonly version: string;
@@ -127,14 +127,15 @@ export function formatCliCommand(input: {
  * source checkout has no `t3` of its own, and one on PATH is a different build
  * that may lack the subcommand, so it re-runs this exact Node and entry script.
  */
-export const resolveCliCommand = (subcommand: string) =>
-  Effect.gen(function* () {
-    const entryPath = yield* resolveEntryPath;
-    if (entryPath.endsWith(".ts")) {
-      return `${yield* HostProcess.ExecutablePath} ${entryPath} ${subcommand}`;
-    }
-    return formatCliCommand({ subcommand, entryPath, version: packageJson.version });
-  });
+export const resolveCliCommand = Effect.fn("invocation.resolveCliCommand")(function* (
+  subcommand: string,
+) {
+  const entryPath = yield* resolveEntryPath;
+  if (entryPath.endsWith(".ts")) {
+    return `${yield* HostProcess.ExecutablePath} ${entryPath} ${subcommand}`;
+  }
+  return formatCliCommand({ subcommand, entryPath, version: packageJson.version });
+});
 
 const shellWord = (value: string) =>
   /^[\w@%+=:,./-]+$/.test(value) ? value : `'${value.replaceAll("'", `'"'"'`)}'`;
@@ -179,21 +180,23 @@ const resolveInstallLauncher = Effect.gen(function* () {
  * installs. `args` are quoted for the host's shell: POSIX, or PowerShell on
  * Windows.
  */
-export const resolveHostCliCommand = (subcommand: string, args: ReadonlyArray<string> = []) =>
-  Effect.gen(function* () {
-    const platform = yield* HostProcess.Platform;
-    const withArgs = (prefix: string) =>
-      [prefix, ...args.map((arg) => hostShellWord(platform, arg))].join(" ");
-    const command = yield* resolveCliCommand(subcommand);
-    if (command !== `t3 ${subcommand}`) return { command: withArgs(command), launcher: false };
-    if (yield* isCommandAvailable("t3")) return { command: withArgs(command), launcher: false };
-    const launcher = yield* resolveInstallLauncher;
-    if (Option.isNone(launcher)) return { command: withArgs(command), launcher: false };
-    // PowerShell runs a quoted path only through the call operator.
-    const quoted = hostShellWord(platform, launcher.value);
-    const call = platform === "win32" ? `& ${quoted}` : quoted;
-    return { command: withArgs(`${call} ${subcommand}`), launcher: true };
-  });
+export const resolveHostCliCommand = Effect.fn("invocation.resolveHostCliCommand")(function* (
+  subcommand: string,
+  args: ReadonlyArray<string> = [],
+) {
+  const platform = yield* HostProcess.Platform;
+  const withArgs = (prefix: string) =>
+    [prefix, ...args.map((arg) => hostShellWord(platform, arg))].join(" ");
+  const command = yield* resolveCliCommand(subcommand);
+  if (command !== `t3 ${subcommand}`) return { command: withArgs(command), launcher: false };
+  if (yield* isCommandAvailable("t3")) return { command: withArgs(command), launcher: false };
+  const launcher = yield* resolveInstallLauncher;
+  if (Option.isNone(launcher)) return { command: withArgs(command), launcher: false };
+  // PowerShell runs a quoted path only through the call operator.
+  const quoted = hostShellWord(platform, launcher.value);
+  const call = platform === "win32" ? `& ${quoted}` : quoted;
+  return { command: withArgs(`${call} ${subcommand}`), launcher: true };
+});
 
 /**
  * `sudo` resets PATH on most distributions, which drops a user-installed Node
@@ -201,19 +204,20 @@ export const resolveHostCliCommand = (subcommand: string, args: ReadonlyArray<st
  * carries PATH through unless Node is on root's PATH too. An absolute launcher
  * needs neither.
  */
-export const resolveRootCliCommand = (subcommand: string) =>
-  Effect.gen(function* () {
-    const { command, launcher } = yield* resolveHostCliCommand(subcommand);
-    if (launcher) return `sudo ${command}`;
-    const executablePath = yield* HostProcess.ExecutablePath;
-    const systemNode = ROOT_PATH_DIRECTORIES.some((directory) =>
-      executablePath.startsWith(`${directory}/`),
-    );
-    // An absolute path needs no PATH lookup.
-    return systemNode || command.startsWith("/")
-      ? `sudo ${command}`
-      : `sudo env "PATH=$PATH" ${command}`;
-  });
+export const resolveRootCliCommand = Effect.fn("invocation.resolveRootCliCommand")(function* (
+  subcommand: string,
+) {
+  const { command, launcher } = yield* resolveHostCliCommand(subcommand);
+  if (launcher) return `sudo ${command}`;
+  const executablePath = yield* HostProcess.ExecutablePath;
+  const systemNode = ROOT_PATH_DIRECTORIES.some((directory) =>
+    executablePath.startsWith(`${directory}/`),
+  );
+  // An absolute path needs no PATH lookup.
+  return systemNode || command.startsWith("/")
+    ? `sudo ${command}`
+    : `sudo env "PATH=$PATH" ${command}`;
+});
 
 const ROOT_PATH_DIRECTORIES = [
   "/usr/local/sbin",

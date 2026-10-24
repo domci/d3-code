@@ -2,7 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, ModelSelection } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { StartThreadOptions } from "../../hooks/useStartThreadWithPrompt";
 import { useEnvironmentSettings } from "../../hooks/useSettings";
@@ -35,9 +35,9 @@ export function BoardThreadSetup(props: {
   ) => void;
 }) {
   const [options, setOptions] = useState<ReadonlyMap<EnvironmentId, StartThreadOptions>>(new Map());
-  const changeOptions = useCallback((environmentId: EnvironmentId, value: StartThreadOptions) => {
+  const changeOptions = (environmentId: EnvironmentId, value: StartThreadOptions) => {
     setOptions((current) => new Map(current).set(environmentId, value));
-  }, []);
+  };
   const environments = [
     ...new Map(props.projects.map((project) => [project.environmentId, project])).values(),
   ];
@@ -83,30 +83,19 @@ function EnvironmentSetup({
   const providers =
     useAtomValue(serverEnvironment.providersValueAtom(project.environmentId)) ??
     EMPTY_SERVER_PROVIDERS;
-  const entries = useMemo(
-    () =>
-      sortProviderInstanceEntries(
-        applyProviderInstanceSettings(
-          deriveProviderInstanceEntries(providers),
-          settings,
-          project.id,
-        ),
-      ),
-    [providers, settings, project.id],
+  const entries = sortProviderInstanceEntries(
+    applyProviderInstanceSettings(deriveProviderInstanceEntries(providers), settings, project.id),
   );
   const defaults = resolveProjectSettings(settings, project.id, project).settings;
   const [selection, setSelection] = useState<ModelSelection | null>(null);
-  const active = useMemo(
-    () =>
-      selection ??
-      defaults.defaultModelSelection ??
-      entries.flatMap((entry) =>
-        entry.models
-          .filter((model) => !model.isLegacy)
-          .map((model): ModelSelection => ({ instanceId: entry.instanceId, model: model.slug })),
-      )[0],
-    [selection, defaults.defaultModelSelection, entries],
-  );
+  const active =
+    selection ??
+    defaults.defaultModelSelection ??
+    entries.flatMap((entry) =>
+      entry.models
+        .filter((model) => !model.isLegacy)
+        .map((model): ModelSelection => ({ instanceId: entry.instanceId, model: model.slug })),
+    )[0];
   const [workspace, setWorkspace] = useState<"local" | "worktree" | "shared">(
     defaults.defaultThreadEnvMode ?? "worktree",
   );
@@ -115,13 +104,9 @@ function EnvironmentSetup({
   const [branch, setBranch] = useState("");
   const [startFromOrigin, setStartFromOrigin] = useState(defaults.newWorktreesStartFromOrigin);
   const activeEntry = entries.find((entry) => entry.instanceId === active?.instanceId);
-  const modelOptions = useMemo(
-    () =>
-      active
-        ? getCustomModelOptionsByInstance(settings, providers, active.instanceId, active.model)
-        : new Map(),
-    [settings, providers, active],
-  );
+  const modelOptions = active
+    ? getCustomModelOptionsByInstance(settings, providers, active.instanceId, active.model)
+    : new Map();
   useEffect(() => {
     if (active)
       onChange(project.environmentId, {
@@ -162,8 +147,6 @@ function EnvironmentSetup({
               provider={activeEntry.driverKind}
               models={activeEntry.models}
               model={active.model}
-              prompt=""
-              onPromptChange={() => {}}
               modelOptions={active.options ?? []}
               allowPromptInjectedEffort={false}
               planModeEnabled={settings.planModeEnabled}

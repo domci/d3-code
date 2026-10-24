@@ -1,8 +1,13 @@
+import {
+  capitalizeTerm,
+  sourceControlClients,
+} from "@t3tools/client-runtime/source-control-clients";
+import { PullRequestChangeBreakdownRows } from "../pullRequest/PullRequestChangeBreakdownStat";
 import { ThreadDetailsControl } from "./ThreadDetailsControl";
 import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
+import { selectEnvironmentQueryData } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import type { EnvironmentId, ProjectId, PullRequestRef, ScopedThreadRef } from "@t3tools/contracts";
-import { sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
 import {
   ArrowUpRightIcon,
   EyeIcon,
@@ -11,6 +16,7 @@ import {
   GitBranchIcon,
   TriangleAlertIcon,
 } from "lucide-react";
+import { AsyncResult } from "effect/reactivity";
 import { useState, type MouseEvent as ReactMouseEvent } from "react";
 
 import type { DraftId } from "~/composerDraftStore";
@@ -19,15 +25,21 @@ import { usePullRequestChecksRefresh } from "~/hooks/usePullRequestChecksRefresh
 import { cn } from "~/lib/utils";
 import { useServerConfigs } from "~/state/entities";
 import { pullRequestEnvironment } from "~/state/pullRequests";
-import { useEnvironmentQuery } from "~/state/query";
+import { useUiStateStore } from "~/uiStateStore";
+import {
+  useEnvironmentQueryIsNewer,
+  useEnvironmentQueryRefresh,
+  useEnvironmentQuerySelector,
+} from "~/state/query";
 
 import {
   buildFixFindingsHandoff,
   buildResolveConflictsPrompt,
   classifyPullRequestChecks,
+  resolvePullRequestDetailChecks,
   describePullRequestChecks,
   isPullRequestConflicting,
-  resolveSelectedMergeMethod,
+  resolvePullRequestMergeMethod,
   allowedPullRequestMergeMethods,
   resolveThreadPanelPullRequestAction,
 } from "../pullRequest/pullRequestDetail.logic";
@@ -43,6 +55,7 @@ import {
 import {
   type PullRequestHandoffWorkspace,
   usePullRequestActionRunner,
+  usePullRequestDefaultMergeMethodResolver,
   usePullRequestHandoffs,
   writeTaskToComposer,
 } from "../pullRequest/usePullRequestActions";
@@ -68,6 +81,10 @@ import {
   THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS,
   THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS,
 } from "./threadDetailsPanelStyles";
+
+// A server without checks for this pull request answers null; polling it again finds nothing new.
+const isSettledWithoutChecks = (result: AsyncResult.AsyncResult<unknown, unknown>) =>
+  result._tag === "Success" && result.value === null;
 
 export function ThreadDetailsPrRow({
   environmentId,
@@ -106,7 +123,7 @@ export function ThreadDetailsPrRow({
   const serverConfigs = useServerConfigs();
   const supportsPullRequests =
     serverConfigs.get(environmentId)?.environment.capabilities.pullRequests === true;
-  const repository = sourceControlRepositorySelector(project?.repositoryIdentity);
+  const repository = sourceControlClients.repositorySelector(project?.repositoryIdentity);
   const reference: PullRequestRef | null =
     supportsPullRequests && project !== null
       ? linkedReference
@@ -115,37 +132,44 @@ export function ThreadDetailsPrRow({
           ? { projectId: project.id as ProjectId, repository, number }
           : null
       : null;
-  const detailQuery = useEnvironmentQuery(
+  const detailAtom =
     reference === null
       ? null
       : pullRequestEnvironment.detail({
           environmentId,
           input: { ...reference, allowStale: false },
-        }),
-  );
+        });
+  // Read the queries part by part: every poll publishes a new result (a new
+  // timestamp, `waiting` on and off) even when nothing in it changed.
+  const detailData = useEnvironmentQuerySelector(detailAtom, selectEnvironmentQueryData);
+  const detailQuery = useEnvironmentQueryRefresh(detailAtom);
   const supportsChecks =
     serverConfigs.get(environmentId)?.environment.capabilities.pullRequestChecks === true;
-  const checksQuery = useEnvironmentQuery(
-    supportsChecks && reference !== null && detailQuery.data !== null
+  const checksAtom =
+    supportsChecks && reference !== null && detailData !== null
       ? pullRequestEnvironment.checks({ environmentId, input: reference })
-      : null,
-  );
-  const detail =
-    detailQuery.data === null
-      ? null
-      : checksQuery.data !== null && checksQuery.dataUpdatedAt >= detailQuery.dataUpdatedAt
-        ? { ...detailQuery.data, ...checksQuery.data }
-        : detailQuery.data;
+      : null;
+  const checksData = useEnvironmentQuerySelector(checksAtom, selectEnvironmentQueryData);
+  const checksSettledEmpty = useEnvironmentQuerySelector(checksAtom, isSettledWithoutChecks);
+  const checksQuery = useEnvironmentQueryRefresh(checksAtom);
+  const checksAreNewer = useEnvironmentQueryIsNewer(checksAtom, detailAtom);
+  const detail = resolvePullRequestDetailChecks(detailData, checksData, checksAreNewer);
+  const terminology = sourceControlClients.get(
+    detail?.provider ?? project?.repositoryIdentity?.provider,
+  ).changeRequest;
   const open = reference !== null && (detail?.state ?? pr?.state) === "open";
   const refreshKey = `${environmentId}:${project?.id}:${reference?.host}:${reference?.repository}:${number}`;
-  useLiveRefresh(detailQuery.isPending ? null : detailQuery.refresh, {
-    enabled: open,
-    key: `workspace-pr:${refreshKey}`,
-    intervalMs: 10 * 60_000,
-  });
+  useLiveRefresh(
+    () => {
+      if (!detailQuery.isPending()) detailQuery.refresh();
+    },
+    { enabled: open, key: `workspace-pr:${refreshKey}`, intervalMs: 10 * 60_000 },
+  );
   usePullRequestChecksRefresh({
-    refresh: checksQuery.isPending || detailQuery.isPending ? null : checksQuery.refresh,
-    enabled: open && supportsChecks && !(checksQuery.isSuccess && checksQuery.data === null),
+    refresh: () => {
+      if (!checksQuery.isPending() && !detailQuery.isPending()) checksQuery.refresh();
+    },
+    enabled: open && supportsChecks && !checksSettledEmpty,
     key: `workspace-pr-checks:${refreshKey}`,
     checks: detail?.checks ?? [],
   });
@@ -153,6 +177,7 @@ export function ThreadDetailsPrRow({
   const { actionPending, perform } = usePullRequestActionRunner({
     environmentId,
     reference,
+    terminology,
     onSuccess: () => {
       detailQuery.refresh();
       checksQuery.refresh();
@@ -160,6 +185,11 @@ export function ThreadDetailsPrRow({
     },
   });
   const { handoff, startHandoff } = usePullRequestHandoffs({ environmentId, detail });
+  const lastSelectedMergeMethod = useUiStateStore((state) => state.pullRequestMergeMethod);
+  const resolveProjectDefaultMergeMethod = usePullRequestDefaultMergeMethodResolver(
+    environmentId,
+    (project?.id as ProjectId | undefined) ?? null,
+  );
   const [confirmingMerge, setConfirmingMerge] = useState(false);
 
   const rowAction = resolveThreadPanelPullRequestAction(detail);
@@ -169,9 +199,11 @@ export function ThreadDetailsPrRow({
   const conflicting = isPullRequestConflicting(detail);
   const checksState = detail === null ? "none" : classifyPullRequestChecks(detail.checks);
   const checksRollup = detail === null ? null : pullRequestChecksState(detail.checks);
-  const selectedMergeMethod = resolveSelectedMergeMethod(
+  const selectedMergeMethod = resolvePullRequestMergeMethod(
     allowedPullRequestMergeMethods(detail),
-    "merge",
+    null,
+    resolveProjectDefaultMergeMethod(),
+    lastSelectedMergeMethod,
   );
 
   const startResolveConflicts = (where: "here" | "new") => {
@@ -189,7 +221,7 @@ export function ThreadDetailsPrRow({
       toastManager.add({
         type: "success",
         title: "Added to the composer",
-        description: "The task is in the composer — read it over, then send.",
+        description: "The task is in the composer. Read it over, then send.",
       });
       return;
     }
@@ -216,7 +248,7 @@ export function ThreadDetailsPrRow({
       toastManager.add({
         type: "success",
         title: "Added to the composer",
-        description: "The task is in the composer — read it over, then send.",
+        description: "The task is in the composer. Read it over, then send.",
       });
       return;
     }
@@ -246,7 +278,9 @@ export function ThreadDetailsPrRow({
 
   const rowTooltip =
     detail === null || statePresentation === null ? (
-      <TooltipPopup side="top">{status?.tooltip ?? `Pull request #${number}`}</TooltipPopup>
+      <TooltipPopup side="top">
+        {status?.tooltip ?? `${capitalizeTerm(terminology.singular)} #${number}`}
+      </TooltipPopup>
     ) : (
       <TooltipPopup
         side="top"
@@ -293,7 +327,7 @@ export function ThreadDetailsPrRow({
             {detail.isDraft && conflicting ? (
               <div className="flex min-w-0 items-start gap-2 text-destructive">
                 <TriangleAlertIcon aria-hidden className="mt-0.5 size-3 shrink-0 stroke-current" />
-                <div className="min-w-0 flex-1 wrap-break-word leading-5">
+                <div className="min-w-0 flex-1 wrap-break-word">
                   Merge conflicts with {detail.baseBranch}
                 </div>
               </div>
@@ -306,6 +340,13 @@ export function ThreadDetailsPrRow({
                 <PullRequestDiffStat additions={detail.additions} deletions={detail.deletions} />
               </div>
             </div>
+            {reference !== null && (detail.additions > 0 || detail.deletions > 0) ? (
+              <PullRequestChangeBreakdownRows
+                environmentId={environmentId}
+                reference={reference}
+                className="pl-5 text-foreground/75"
+              />
+            ) : null}
           </div>
         </div>
       </TooltipPopup>
@@ -331,7 +372,7 @@ export function ThreadDetailsPrRow({
             pending: actionPending,
             destructive: false,
             suffix: null,
-            tooltip: "Mark this pull request as ready for review",
+            tooltip: `Mark this ${terminology.singular} as ready for review`,
             onClick: () => void perform("ready"),
           }
         : rowAction === "fix"
@@ -353,7 +394,7 @@ export function ThreadDetailsPrRow({
                 pending: actionPending,
                 destructive: false,
                 suffix: null,
-                tooltip: `Merge this pull request (${selectedMergeMethod})`,
+                tooltip: `Merge this ${terminology.singular} (${selectedMergeMethod})`,
                 onClick: () => setConfirmingMerge(true),
               }
             : null;
@@ -498,7 +539,7 @@ export function ThreadDetailsPrRow({
         <AlertDialog open={confirmingMerge} onOpenChange={(open) => setConfirmingMerge(open)}>
           <AlertDialogPopup>
             <AlertDialogHeader>
-              <AlertDialogTitle>Merge pull request?</AlertDialogTitle>
+              <AlertDialogTitle>Merge {terminology.singular}?</AlertDialogTitle>
               <AlertDialogDescription>
                 This merges #{number} using {selectedMergeMethod}.
               </AlertDialogDescription>

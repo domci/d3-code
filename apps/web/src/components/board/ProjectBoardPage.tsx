@@ -12,7 +12,7 @@ import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import * as Schema from "effect/Schema";
-import { useContext, useDeferredValue, useMemo, useRef, useState, type ReactNode } from "react";
+import { useContext, useDeferredValue, useRef, useState, type ReactNode } from "react";
 
 import { isElectron } from "../../env";
 import { useOpenDraftWithPrompt } from "../../hooks/useOpenDraftWithPrompt";
@@ -119,39 +119,28 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
   const allProjects = useProjects();
   const projectsKnown = useAllEnvironmentShellsBootstrapped();
   const registry = useContext(RegistryContext);
-  const repos = useMemo(() => dedupeBoardRepositories(allProjects), [allProjects]);
+  const repos = dedupeBoardRepositories(allProjects);
 
   // One read per repository, in parallel, shown together as they settle.
-  const boardAtoms = useMemo(
-    () =>
-      repos.map((repo) =>
-        sourceControlEnvironment.projectBoard({
-          environmentId: repo.project.environmentId,
-          input: { cwd: repo.project.workspaceRoot },
-        }),
-      ),
-    [repos],
+  const boardAtoms = repos.map((repo) =>
+    sourceControlEnvironment.projectBoard({
+      environmentId: repo.project.environmentId,
+      input: { cwd: repo.project.workspaceRoot },
+    }),
   );
-  const resultsAtom = useMemo(
-    () => Atom.make((get) => boardAtoms.map((atom) => get(atom))),
-    [boardAtoms],
-  );
+  const resultsAtom = Atom.make((get) => boardAtoms.map((atom) => get(atom)));
   const results = useAtomValue(resultsAtom);
-  const states = useMemo(
-    () =>
-      results.map((result, index) => {
-        const failure =
-          result._tag === "Failure" ? Option.getOrNull(Cause.findErrorOption(result.cause)) : null;
-        return {
-          repo: repos[index] as Repository,
-          board: Option.getOrNull(AsyncResult.value(result))?.board ?? null,
-          error: result._tag === "Failure" ? formatEnvironmentQueryError(result.cause) : null,
-          scopeMissing: isProjectBoardError(failure) && failure.reason === "scope_missing",
-          settled: result._tag !== "Initial",
-        };
-      }),
-    [repos, results],
-  );
+  const states = results.map((result, index) => {
+    const failure =
+      result._tag === "Failure" ? Option.getOrNull(Cause.findErrorOption(result.cause)) : null;
+    return {
+      repo: repos[index] as Repository,
+      board: Option.getOrNull(AsyncResult.value(result))?.board ?? null,
+      error: result._tag === "Failure" ? formatEnvironmentQueryError(result.cause) : null,
+      scopeMissing: isProjectBoardError(failure) && failure.reason === "scope_missing",
+      settled: result._tag !== "Initial",
+    };
+  });
   const loaded = states.filter((state) => state.board !== null);
   const failures = states.filter((state) => state.error !== null);
   const pending = results.some((result) => result.waiting);
@@ -182,7 +171,7 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
   };
 
   const movePermissions = useAtomValue(
-    useMemo(() => {
+    (() => {
       const permissions = repos.map((repo) => ({
         key: repo.key,
         atom: sourceControlEnvironment.moveProjectBoardItem.permissionAtom(
@@ -192,7 +181,7 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
       return Atom.make(
         (get) => new Set(permissions.filter(({ atom }) => get(atom)).map(({ key }) => key)),
       );
-    }, [repos]),
+    })(),
   );
   const moveItem = useAtomCommand(sourceControlEnvironment.moveProjectBoardItem, {
     reportFailure: false,
@@ -203,7 +192,7 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
     reportFailure: false,
   });
   const issueStatePermissions = useAtomValue(
-    useMemo(() => {
+    (() => {
       const permissions = repos.map((repo) => ({
         key: repo.key,
         atom: sourceControlEnvironment.setProjectBoardIssueState.permissionAtom(
@@ -213,7 +202,7 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
       return Atom.make(
         (get) => new Set(permissions.filter(({ atom }) => get(atom)).map(({ key }) => key)),
       );
-    }, [repos]),
+    })(),
   );
 
   // Moves shown before GitHub has confirmed them. Each belongs to the board it was made on: once
@@ -336,15 +325,17 @@ export function ProjectBoardPage(props: { readonly search: ProjectBoardSearch })
     if (actionRunning.current) return;
     actionRunning.current = true;
     setBusy(true);
-    try {
+    // React Compiler cannot compile try/finally yet, so cleanup rides on the promise.
+    const runItems = async () => {
       for (const item of items) {
         if (await action(item)) toggleSelected(item, false);
       }
-    } finally {
+    };
+    await runItems().finally(() => {
       if (refresh) new Set(items.map((item) => item.repoKey)).forEach(refreshRepo);
       actionRunning.current = false;
       setBusy(false);
-    }
+    });
   };
 
   const changeIssueState = async (item: BoardCardItem, state: "open" | "closed") => {

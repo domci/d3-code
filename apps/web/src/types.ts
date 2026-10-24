@@ -80,15 +80,6 @@ export function isVideoAttachment(attachment: ChatFileAttachment): boolean {
   return videoMimeType(attachment) !== null;
 }
 
-export function isBrowserPreviewAttachment(attachment: ChatFileAttachment): boolean {
-  const mimeType = attachment.mimeType.split(";", 1)[0]?.trim().toLowerCase();
-  return (
-    /\.(?:html?|pdf)$/i.test(attachment.name) ||
-    mimeType === "application/pdf" ||
-    mimeType === "text/html"
-  );
-}
-
 export interface ChatMessage {
   readonly context?: import("@t3tools/contracts").OrchestrationMessageContext | undefined;
   readonly id: MessageId;
@@ -101,6 +92,7 @@ export interface ChatMessage {
   readonly creationSource?: OrchestrationV2CreationSource;
   readonly scheduledTaskId?: ScheduledTaskId;
   readonly senderThreadId?: ThreadId;
+  readonly idleCompaction?: import("@t3tools/contracts").OrchestrationV2IdleCompaction;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly inputIntent?: OrchestrationV2UserMessageInputIntent | undefined;

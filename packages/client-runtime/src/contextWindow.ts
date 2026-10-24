@@ -1,11 +1,12 @@
 import type {
-  OrchestrationV2ThreadProjection,
   OrchestrationV2ProviderTurn,
   OrchestrationV2ProviderTurnTokenUsage,
-  OrchestrationV2TurnItem,
+  OrchestrationV2ProviderThread,
   ThreadTokenUsageSnapshot,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+
+import type { ThreadStructure, ThreadStructureTurnItem } from "./state/models.ts";
 
 function asFiniteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -28,6 +29,8 @@ export type ContextWindowSnapshot = NullableContextWindowUsage & {
     by provider thread, not time, so pick by timestamp. */
 export function latestProviderTurnTokenUsage(
   turns: ReadonlyArray<Pick<OrchestrationV2ProviderTurn, "tokenUsage">>,
+  projection?: Pick<ThreadStructure, "thread" | "contextTransfers"> | null,
+  providerThread?: Pick<OrchestrationV2ProviderThread, "contextUsage"> | null,
 ): OrchestrationV2ProviderTurnTokenUsage | null {
   let latest: OrchestrationV2ProviderTurnTokenUsage | null = null;
   for (const { tokenUsage } of turns) {
@@ -37,16 +40,29 @@ export function latestProviderTurnTokenUsage(
       latest = tokenUsage;
     }
   }
-  return latest;
+  if (latest !== null || projection == null || providerThread?.contextUsage != null) return latest;
+  const forkedFrom = projection.thread.forkedFrom;
+  if (forkedFrom?.type !== "run") return null;
+  return (
+    projection.contextTransfers.find(
+      (transfer) =>
+        transfer.type === "fork" &&
+        transfer.targetThreadId === projection.thread.id &&
+        transfer.sourceThreadId === forkedFrom.threadId &&
+        transfer.sourcePoint.runId === forkedFrom.runId &&
+        transfer.sourceProviderInstanceId === projection.thread.modelSelection.instanceId &&
+        (transfer.status === "pending" || transfer.resolution?.strategy === "native_fork"),
+    )?.sourceTokenUsage ?? null
+  );
 }
 
 export function deriveLatestContextWindowSnapshot(
   entries: ReadonlyArray<{
-    readonly item: OrchestrationV2TurnItem;
+    readonly item: ThreadStructureTurnItem;
   }>,
   projection: Pick<
-    OrchestrationV2ThreadProjection,
-    "thread" | "providerThreads" | "providerTurns" | "attempts"
+    ThreadStructure,
+    "thread" | "providerThreads" | "providerTurns" | "attempts" | "contextTransfers"
   > | null,
 ): ContextWindowSnapshot | null {
   if (projection === null) return null;
@@ -60,9 +76,7 @@ export function deriveLatestContextWindowSnapshot(
   const turns = new Map(projection.providerTurns.map((turn) => [turn.id, turn]));
   const nativeThreadId = providerThread.nativeThreadRef?.nativeId;
   // Recovery may reuse the row for a different native conversation; legacy identities are optional.
-  const belongsToNativeThread = (
-    turn: OrchestrationV2ThreadProjection["providerTurns"][number] | undefined,
-  ) => {
+  const belongsToNativeThread = (turn: ThreadStructure["providerTurns"][number] | undefined) => {
     const attempt = turn?.runAttemptId == null ? undefined : attempts.get(turn.runAttemptId);
     return (
       nativeThreadId === undefined ||
@@ -70,18 +84,20 @@ export function deriveLatestContextWindowSnapshot(
       attempt.nativeThreadId === nativeThreadId
     );
   };
-  const liveUsage = projection.providerTurns.reduce<
-    OrchestrationV2ThreadProjection["providerTurns"][number] | null
-  >(
-    (latest, candidate) =>
-      candidate.providerThreadId === providerThread.id &&
-      belongsToNativeThread(candidate) &&
-      candidate.tokenUsage !== undefined &&
-      (latest === null || candidate.ordinal > latest.ordinal)
-        ? candidate
-        : latest,
-    null,
-  )?.tokenUsage;
+  const liveUsage =
+    projection.providerTurns.reduce<ThreadStructure["providerTurns"][number] | null>(
+      (latest, candidate) =>
+        candidate.providerThreadId === providerThread.id &&
+        belongsToNativeThread(candidate) &&
+        candidate.tokenUsage !== undefined &&
+        (latest === null || candidate.ordinal > latest.ordinal)
+          ? candidate
+          : latest,
+      null,
+    )?.tokenUsage ??
+    // A fresh fork reports its source's usage until its own first turn does.
+    latestProviderTurnTokenUsage([], projection, providerThread) ??
+    undefined;
   const compaction = entries.findLast(
     ({ item }) =>
       item.type === "compaction" &&
@@ -100,7 +116,8 @@ export function deriveLatestContextWindowSnapshot(
       ? DateTime.toEpochMillis(providerThread.updatedAt)
       : Date.parse(liveUsage.updatedAt);
   const newerCompaction =
-    compaction !== undefined && DateTime.toEpochMillis(compaction.updatedAt) > usageUpdatedAt;
+    compaction?.type === "compaction" &&
+    DateTime.toEpochMillis(compaction.updatedAt) > usageUpdatedAt;
   if (liveUsage != null && !newerCompaction) {
     const usedTokens = Math.max(0, liveUsage.usedTokens);
     const maxTokens =
@@ -129,7 +146,7 @@ export function deriveLatestContextWindowSnapshot(
       toolUses: null,
       durationMs: null,
       compactsAutomatically: providerThread.contextUsage?.compactsAutomatically ?? null,
-      autoCompactThreshold: null,
+      autoCompactThreshold: liveUsage.autoCompactThreshold ?? null,
       cost: null,
       updatedAt: liveUsage.updatedAt,
     };

@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
-import { type RepositoryIdentity } from "@t3tools/contracts";
+import { type RepositoryIdentity, SourceControlProviderKind } from "@t3tools/contracts";
 
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as GitHubApi from "@t3tools/source-control-github/server/GitHubRequestPolicy";
@@ -157,7 +157,7 @@ const identity: RepositoryIdentity = {
   locator: { source: "git-remote", remoteName: "origin", remoteUrl: "git@github.com:acme/web.git" },
   owner: "acme",
   name: "web",
-  provider: "github",
+  provider: SourceControlProviderKind.make("github"),
 };
 
 const LINKED_BODY = JSON.stringify({

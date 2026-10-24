@@ -1,5 +1,7 @@
-import type { NodeId, OrchestrationV2ThreadProjection, PlanId, RunId } from "@t3tools/contracts";
+import type { NodeId, OrchestrationV2ThreadProjection, RunId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+
+import type { ThreadStructure } from "./models.ts";
 
 export interface ThreadTaskProgress {
   readonly runId: RunId;
@@ -13,21 +15,9 @@ export interface ThreadTaskProgress {
   }>;
 }
 
-export function planItemTime(projection: OrchestrationV2ThreadProjection, planId: PlanId): string {
-  const item = projection.turnItems.findLast(
-    (candidate) =>
-      (candidate.type === "proposed_plan" || candidate.type === "todo_list") &&
-      candidate.planId === planId,
-  );
-  return DateTime.formatIso(item?.updatedAt ?? projection.updatedAt);
-}
-
 /** Current root work only: retries and child tasks own separate checklists. */
 export function deriveCurrentTaskProgress(
-  projection: Pick<
-    OrchestrationV2ThreadProjection,
-    "thread" | "runs" | "attempts" | "nodes" | "plans"
-  > | null,
+  projection: Pick<ThreadStructure, "thread" | "runs" | "attempts" | "nodes" | "plans"> | null,
   activityRunId: RunId | undefined,
 ): ThreadTaskProgress | null {
   if (projection === null || activityRunId === undefined) return null;
