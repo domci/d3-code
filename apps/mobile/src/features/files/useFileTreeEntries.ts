@@ -56,7 +56,9 @@ export function useFileTreeEntries(input: {
     if (
       cwd === null ||
       environmentId === null ||
-      (!refresh && directories.entries.has(directoryPath)) ||
+      // FileTreeBrowser re-requests expanded paths every render; a failed one waits for refresh.
+      (!refresh &&
+        (directories.entries.has(directoryPath) || directories.errors.has(directoryPath))) ||
       directories.pending.has(directoryPath)
     ) {
       return;
