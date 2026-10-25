@@ -28,6 +28,7 @@ import {
   type EnvironmentSubscriptionRpcTag,
   type EnvironmentUnaryRpcTag,
   EnvironmentRpcUnavailableError,
+  isRpcSocketError,
   request,
   requestGuarded,
   RpcPermissionGuard,
@@ -43,11 +44,16 @@ const isEnvironmentRpcUnavailable = Schema.is(EnvironmentRpcUnavailableError);
  * query atom reruns when it sees that session change, so settling first would
  * show a failure for a query that is about to retry. While `session` is still
  * current no rerun is coming, and the failure stands.
+ *
+ * A broken socket always ends its session, so that rerun is coming even while
+ * the supervisor has yet to notice: on a flaky link every in-flight query would
+ * otherwise flash an error on each drop.
  */
 const pendingOnceSessionReplaced =
   (session: RpcSession.RpcSession) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
+      Effect.catchIf(isRpcSocketError, () => Effect.never),
       // The query's error type is generic, so its tags are unknown to `catchTags`.
       Effect.catchIf(isEnvironmentRpcUnavailable, (error) =>
         EnvironmentSupervisor.EnvironmentSupervisor.pipe(

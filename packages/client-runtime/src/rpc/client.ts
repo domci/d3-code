@@ -103,7 +103,22 @@ export class EnvironmentRpcSubscriptionObserver extends Context.Reference<{
   }),
 }) {}
 
-export const isRpcClientError = Schema.is(RpcClientError.RpcClientError);
+const isRpcClientError = Schema.is(RpcClientError.RpcClientError);
+
+/** The socket under a session broke, which always ends that session. */
+export function isRpcSocketError(error: unknown): boolean {
+  if (!isRpcClientError(error)) {
+    return false;
+  }
+  switch (error.reason._tag) {
+    case "SocketReadError":
+    case "SocketWriteError":
+    case "SocketCloseError":
+      return true;
+    default:
+      return false;
+  }
+}
 const isEnvironmentAuthorizationError = Schema.is(EnvironmentAuthorizationError);
 
 const MAX_EXPECTED_FAILURE_RETRY_DELAY_MS = 30_000;

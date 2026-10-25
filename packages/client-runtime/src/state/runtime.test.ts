@@ -16,10 +16,12 @@ import * as Latch from "effect/Latch";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
+import * as RpcClientError from "effect/rpc/RpcClientError";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
+import * as Socket from "effect/socket/Socket";
 
 import {
   AVAILABLE_CONNECTION_STATE,
@@ -615,6 +617,58 @@ describe("environment query lifecycle", () => {
         expect(observed.some(AsyncResult.isFailure)).toBe(false);
 
         yield* SubscriptionRef.set(harness.supervisorSession, Option.some(QUERY_RPC_SESSION));
+        yield* SubscriptionRef.set(
+          harness.supervisorState,
+          queryConnectionState({ generation: 2 }),
+        );
+        expect(
+          yield* AtomRegistry.getResult(registry, harness.atom, {
+            suspendOnWaiting: true,
+          }),
+        ).toBe("recovered");
+        expect(observed.some(AsyncResult.isFailure)).toBe(false);
+      }),
+    ),
+  );
+
+  it.effect("keeps a query pending when its socket breaks mid-request, then reruns", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let executions = 0;
+        const execute = Effect.suspend(() => {
+          executions += 1;
+          return executions > 1
+            ? Effect.succeed("recovered")
+            : Effect.fail(
+                new RpcClientError.RpcClientError({
+                  reason: new Socket.SocketReadError({
+                    cause: new Error("The network connection was lost."),
+                  }),
+                }),
+              );
+        });
+        const harness = yield* makeEnvironmentQueryHarness(execute);
+        const registry = AtomRegistry.make();
+        const observed: Array<AsyncResult.AsyncResult<string, unknown>> = [];
+        const unsubscribe = registry.subscribe(
+          harness.atom,
+          (result) => {
+            observed.push(result);
+          },
+          { immediate: true },
+        );
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            unsubscribe();
+            registry.dispose();
+          }),
+        );
+        yield* Effect.yieldNow;
+
+        // The supervisor has not noticed the drop yet: the session is still current.
+        expect(executions).toBe(1);
+        expect(observed.some(AsyncResult.isFailure)).toBe(false);
+
         yield* SubscriptionRef.set(
           harness.supervisorState,
           queryConnectionState({ generation: 2 }),

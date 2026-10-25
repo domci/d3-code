@@ -1,5 +1,7 @@
+import * as Cache from "effect/Cache";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -53,6 +55,10 @@ const PAGE_SIZE = 100;
 export const MAX_BOARD_ITEMS = 1000;
 /** Longest body text sent to clients, which search it; the rest is cut here. */
 export const MAX_BODY_CHARS = 2000;
+/** Long enough to outlast a client's reconnect backoff, short enough that a refresh stays fresh. */
+const BOARD_CACHE_TTL = "1 minute";
+
+const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 
 const BOARD_ITEMS = `items(first:${PAGE_SIZE},after:$after){
   pageInfo{ hasNextPage endCursor }
@@ -344,15 +350,15 @@ export const make = Effect.gen(function* () {
   >();
 
   /** Reads and writes here are a user acting on a board, so they may spend the GraphQL reserve. */
-  const graphql = (
-    operation: string,
-    input: {
-      readonly host: string;
-      readonly query: string;
-      readonly variables: Readonly<Record<string, unknown>>;
-    },
-  ) =>
-    Effect.gen(function* () {
+  const graphql = Effect.fn("GitHubProjectBoard.graphql")(
+    function* (
+      operation: string,
+      input: {
+        readonly host: string;
+        readonly query: string;
+        readonly variables: Readonly<Record<string, unknown>>;
+      },
+    ) {
       const mutation = input.query.startsWith("mutation");
       const document = input.query.replace(/^(query|mutation)\b/, "$1 ProjectBoard");
       const operationDefinition = (mutation ? GraphQL.mutation : GraphQL.query)("ProjectBoard", {
@@ -366,22 +372,25 @@ export const make = Effect.gen(function* () {
       const data = yield* client
         .ProjectBoard(input.variables)
         .pipe(GitHubGraphQlClient.call({ host: input.host, operation, allowReserve: true }));
-      return yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({ data });
-    }).pipe(
-      Effect.provide(graphQlContext),
-      Effect.mapError(
-        (cause) =>
-          new ProjectBoardError({
-            operation,
-            reason:
-              cause._tag === "GitHubApiResponseError" && isMissingProjectScope(cause)
-                ? "scope_missing"
-                : "failed",
-            detail: cause.message,
-            cause,
-          }),
+      return yield* encodeJson({ data });
+    },
+    (effect, operation) =>
+      effect.pipe(
+        Effect.provide(graphQlContext),
+        Effect.mapError(
+          (cause) =>
+            new ProjectBoardError({
+              operation,
+              reason:
+                cause._tag === "GitHubApiResponseError" && isMissingProjectScope(cause)
+                  ? "scope_missing"
+                  : "failed",
+              detail: cause.message,
+              cause,
+            }),
+        ),
       ),
-    );
+  );
 
   const resolveRepository = Effect.fn("GitHubProjectBoard.resolveRepository")(function* (
     operation: string,
@@ -399,7 +408,7 @@ export const make = Effect.gen(function* () {
     return { host, owner: identity.owner, name: identity.name };
   });
 
-  const getProjectBoard = Effect.fn("GitHubProjectBoard.getProjectBoard")(function* (
+  const readProjectBoard = Effect.fn("GitHubProjectBoard.readProjectBoard")(function* (
     input: ProjectBoardInput,
   ) {
     const operation = "getProjectBoard";
@@ -438,6 +447,30 @@ export const make = Effect.gen(function* () {
       onSome: Effect.succeed,
     });
     return { projects: linked, board };
+  });
+
+  // A read takes up to eleven sequential GitHub requests. It runs in the service's scope, not the
+  // caller's, so a client on a flaky link that drops mid-read gets the finished read on its retry
+  // instead of starting over. Failures leave the cache so the retry reads again.
+  const scope = yield* Effect.scope;
+  // Plain-object keys compare structurally, so each decoded request finds the same entry.
+  const boards: Cache.Cache<
+    ProjectBoardInput,
+    Fiber.Fiber<ProjectBoardResult, ProjectBoardError>
+  > = yield* Cache.make({
+    capacity: 64,
+    timeToLive: BOARD_CACHE_TTL,
+    lookup: (input: ProjectBoardInput) =>
+      readProjectBoard(input).pipe(
+        Effect.onError(() => Cache.invalidate(boards, input)),
+        Effect.forkIn(scope),
+      ),
+  });
+
+  const getProjectBoard = Effect.fn("GitHubProjectBoard.getProjectBoard")(function* (
+    input: ProjectBoardInput,
+  ) {
+    return yield* Fiber.join(yield* Cache.get(boards, input));
   });
 
   const moveItem = Effect.fn("GitHubProjectBoard.moveItem")(function* (
@@ -481,7 +514,14 @@ export const make = Effect.gen(function* () {
     });
   });
 
-  return GitHubProjectBoard.of({ getProjectBoard, moveItem, setIssueState });
+  // A write can change any cached board, and writes are rare enough to drop them all.
+  const forgetBoards = Effect.ensuring(Cache.invalidateAll(boards));
+
+  return GitHubProjectBoard.of({
+    getProjectBoard,
+    moveItem: (input) => forgetBoards(moveItem(input)),
+    setIssueState: (input) => forgetBoards(setIssueState(input)),
+  });
 });
 
 export const layer = Layer.effect(GitHubProjectBoard, make);

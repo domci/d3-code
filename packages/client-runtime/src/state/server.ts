@@ -40,7 +40,7 @@ import { safeErrorLogAttributes } from "../errors/safeLog.ts";
 import * as Persistence from "../platform/persistence.ts";
 import { runCachePersistence } from "./cachePersistence.ts";
 import {
-  isRpcClientError,
+  isRpcSocketError,
   request,
   runStream,
   subscribe,
@@ -303,20 +303,6 @@ export function serverUpdateStateForServerVersion(
 
 export function serverUpdateFailureMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Server update failed.";
-}
-
-function isRpcSocketError(error: unknown): boolean {
-  if (!isRpcClientError(error)) {
-    return false;
-  }
-  switch (error.reason._tag) {
-    case "SocketReadError":
-    case "SocketWriteError":
-    case "SocketCloseError":
-      return true;
-    default:
-      return false;
-  }
 }
 
 export function isLegacyUpdateHandoffLoss(cause: Cause.Cause<unknown>): boolean {

@@ -1,5 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as Latch from "effect/Latch";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
@@ -427,6 +429,77 @@ describe("GitHubProjectBoard", () => {
         item: "PVTI_1",
         field: "F_1",
       });
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("keeps reading a board its caller dropped, and hands it to the retry", () => {
+    const boardRequested = Latch.makeUnsafe();
+    const releaseBoard = Latch.makeUnsafe();
+    const { calls, layer } = makeService((call) => {
+      if (call.query.includes("projectsV2")) return Effect.succeed(LINKED_BODY);
+      boardRequested.openUnsafe();
+      return releaseBoard.await.pipe(Effect.as(BOARD_BODY));
+    });
+    return Effect.gen(function* () {
+      const board = yield* GitHubProjectBoard.GitHubProjectBoard;
+      const dropped = yield* Effect.forkChild(board.getProjectBoard({ cwd: "/work/web" }));
+      yield* boardRequested.await;
+      yield* Fiber.interrupt(dropped);
+      releaseBoard.openUnsafe();
+      const result = yield* board.getProjectBoard({ cwd: "/work/web" });
+      assert.isNotNull(result.board);
+      assert.strictEqual(calls.length, 2);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("reads a board again after one of its cards moves", () => {
+    const { calls, layer } = makeService((call) =>
+      Effect.succeed(
+        call.query.includes("projectsV2")
+          ? LINKED_BODY
+          : call.query.startsWith("mutation")
+            ? '{"data":{}}'
+            : BOARD_BODY,
+      ),
+    );
+    return Effect.gen(function* () {
+      const board = yield* GitHubProjectBoard.GitHubProjectBoard;
+      yield* board.getProjectBoard({ cwd: "/work/web" });
+      yield* board.getProjectBoard({ cwd: "/work/web" });
+      assert.strictEqual(calls.length, 2);
+      yield* board.moveItem({
+        cwd: "/work/web",
+        projectId: "PVT_1",
+        itemId: "PVTI_1",
+        fieldId: "F_1",
+        optionId: "opt_done",
+      });
+      yield* board.getProjectBoard({ cwd: "/work/web" });
+      assert.strictEqual(calls.length, 5);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("reads a board again after a failed read", () => {
+    let failNext = true;
+    const { calls, layer } = makeService((call) => {
+      if (failNext) {
+        failNext = false;
+        return Effect.fail(
+          new GitHubApi.GitHubApiResponseError({
+            host: "github.com",
+            operation: "listLinkedProjects",
+            status: 502,
+          }),
+        );
+      }
+      return Effect.succeed(call.query.includes("projectsV2") ? LINKED_BODY : BOARD_BODY);
+    });
+    return Effect.gen(function* () {
+      const board = yield* GitHubProjectBoard.GitHubProjectBoard;
+      yield* Effect.flip(board.getProjectBoard({ cwd: "/work/web" }));
+      const result = yield* board.getProjectBoard({ cwd: "/work/web" });
+      assert.isNotNull(result.board);
+      assert.strictEqual(calls.length, 3);
     }).pipe(Effect.provide(layer));
   });
 
