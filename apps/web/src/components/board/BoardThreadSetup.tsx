@@ -2,7 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, ModelSelection } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import type { StartThreadOptions } from "../../hooks/useStartThreadWithPrompt";
 import { useEnvironmentSettings } from "../../hooks/useSettings";
@@ -35,9 +35,14 @@ export function BoardThreadSetup(props: {
   ) => void;
 }) {
   const [options, setOptions] = useState<ReadonlyMap<EnvironmentId, StartThreadOptions>>(new Map());
-  const changeOptions = (environmentId: EnvironmentId, value: StartThreadOptions) => {
-    setOptions((current) => new Map(current).set(environmentId, value));
-  };
+  // Child effects report on every render; skipping equal values keeps that from looping.
+  const changeOptions = useCallback((environmentId: EnvironmentId, value: StartThreadOptions) => {
+    setOptions((current) =>
+      JSON.stringify(current.get(environmentId)) === JSON.stringify(value)
+        ? current
+        : new Map(current).set(environmentId, value),
+    );
+  }, []);
   const environments = [
     ...new Map(props.projects.map((project) => [project.environmentId, project])).values(),
   ];
