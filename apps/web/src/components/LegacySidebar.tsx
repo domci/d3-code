@@ -25,7 +25,8 @@ import {
   useLinkedThreadPullRequest,
 } from "./ThreadStatusIndicators";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
-import { repositoryAccent, repositoryLabel } from "./board/projectBoard.logic";
+import { repositoryLabel } from "@t3tools/client-runtime/state/project-board";
+import { repositoryAccent } from "./board/projectBoard.logic";
 import { ProjectFavicon } from "./ProjectFavicon";
 import {
   ProjectThreadFolderRow,

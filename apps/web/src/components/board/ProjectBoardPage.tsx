@@ -53,14 +53,13 @@ import { ProjectFavicon } from "../ProjectFavicon";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../WorkspaceBreadcrumb";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { BoardThreadSetup } from "./BoardThreadSetup";
+import { BOARD_REPOSITORIES_KEY, repositoryAccent } from "./projectBoard.logic";
 import {
-  BOARD_REPOSITORIES_KEY,
   NO_BOARD_FILTERS,
   collectBoardFacets,
   dedupeBoardRepositories,
   filterBoardItems,
   mergeBoardColumns,
-  repositoryAccent,
   resolveDropTarget,
   startThreadPrompt,
   type BoardCardItem,
@@ -68,7 +67,7 @@ import {
   type BoardFilters,
   type BoardRepository,
   type BoardStateFilter,
-} from "./projectBoard.logic";
+} from "@t3tools/client-runtime/state/project-board";
 
 export interface ProjectBoardSearch {
   readonly environmentId?: EnvironmentId;

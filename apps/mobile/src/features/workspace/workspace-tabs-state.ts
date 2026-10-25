@@ -42,6 +42,7 @@ export function initialWorkspaceTabsState(): WorkspaceTabsState {
     tabs: {
       threads: emptyTab(),
       pullRequests: emptyTab(),
+      board: emptyTab(),
       usage: emptyTab(),
     },
   };

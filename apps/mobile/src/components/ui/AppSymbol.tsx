@@ -81,6 +81,7 @@ import IconKeyboard from "@tabler/icons-react-native/IconKeyboard";
 import IconKeyboardHide from "@tabler/icons-react-native/IconKeyboardHide";
 import IconLock from "@tabler/icons-react-native/IconLock";
 import IconLayoutColumns from "@tabler/icons-react-native/IconLayoutColumns";
+import IconLayoutKanban from "@tabler/icons-react-native/IconLayoutKanban";
 import IconLayoutSidebar from "@tabler/icons-react-native/IconLayoutSidebar";
 import IconLayoutSidebarRight from "@tabler/icons-react-native/IconLayoutSidebarRight";
 import IconLetterSpacing from "@tabler/icons-react-native/IconLetterSpacing";
@@ -256,6 +257,7 @@ const ANDROID_ICON_BY_SF_SYMBOL = {
   "square.on.square": IconCopy,
   "square.grid.2x2": IconApps,
   "square.split.2x1": IconLayoutColumns,
+  "rectangle.split.3x1": IconLayoutKanban,
   star: IconStar,
   "star.fill": IconStarFilled,
   "sun.max": IconSun,

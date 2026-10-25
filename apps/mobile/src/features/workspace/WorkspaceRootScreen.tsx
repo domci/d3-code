@@ -109,7 +109,8 @@ function WorkspaceRootContent() {
   );
   const tab = state.tabs[state.selectedTab];
   const bottomClearance =
-    layout.primarySidebarOverlaysContent && state.selectedTab === "usage"
+    layout.primarySidebarOverlaysContent &&
+    (state.selectedTab === "usage" || state.selectedTab === "board")
       ? workspaceDockBottomClearance({ bottomInset: insets.bottom, keyboardHeight })
       : Platform.OS === "ios" && isDuoDevice(deviceType)
         ? workspaceSearchBottomClearance({
@@ -158,7 +159,10 @@ function WorkspaceRootContent() {
                 ? { headerSearchBarOptions: undefined, unstable_headerRightItems: () => [] }
                 : {}),
               unstable_headerLeftItems: () => [],
-              headerTitle: state.selectedTab === "usage" ? undefined : renderHeaderTitle,
+              headerTitle:
+                state.selectedTab === "usage" || state.selectedTab === "board"
+                  ? undefined
+                  : renderHeaderTitle,
             }}
           />
         ) : (
@@ -214,7 +218,7 @@ function WorkspaceRootContent() {
         ) : (
           <WorkspaceSectionToolbar
             onNewTask={startNewTask}
-            showCompose={state.selectedTab !== "usage"}
+            showCompose={state.selectedTab !== "usage" && state.selectedTab !== "board"}
           />
         )}
       </View>

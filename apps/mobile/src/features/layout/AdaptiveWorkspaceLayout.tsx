@@ -206,10 +206,12 @@ function AdaptiveWorkspaceLayoutContent(
   const { width: viewportWidth, height } = nativeMetrics ?? windowDimensions;
   const pathname = props.pathname;
   const workspace = useWorkspaceTabs();
-  // Settings and Usage occupy the workspace rather than a list/detail pair.
+  // Settings, Board and Usage occupy the workspace rather than a list/detail pair.
   const workspacePage =
     Platform.OS === "android" &&
-    (pathname.startsWith("/settings") || workspace?.state.selectedTab === "usage");
+    (pathname.startsWith("/settings") ||
+      workspace?.state.selectedTab === "usage" ||
+      workspace?.state.selectedTab === "board");
   const navigation = useNavigation();
   const activeRoleOwner = useRef<symbol | null>(null);
   const [primarySidebarPreferredVisible, setPrimarySidebarPreferredVisible] = useState(true);

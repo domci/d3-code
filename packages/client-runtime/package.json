@@ -219,6 +219,10 @@
       "types": "./src/state/providerInstanceDisplay.ts",
       "default": "./src/state/providerInstanceDisplay.ts"
     },
+    "./state/project-board": {
+      "types": "./src/state/projectBoard.ts",
+      "default": "./src/state/projectBoard.ts"
+    },
     "./state/pull-requests": {
       "types": "./src/state/pullRequests.ts",
       "default": "./src/state/pullRequests.ts"
