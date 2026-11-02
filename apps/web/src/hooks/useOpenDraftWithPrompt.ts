@@ -1,5 +1,4 @@
 import type { ModelSelection, ScopedProjectRef } from "@t3tools/contracts";
-import { useCallback } from "react";
 
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useNewThreadHandler } from "./useHandleNewThread";
@@ -21,33 +20,28 @@ export function useOpenDraftWithPrompt(): (
   options?: DraftPromptOptions,
 ) => Promise<boolean> {
   const newThread = useNewThreadHandler();
-  return useCallback(
-    async (projectRef, prompt, options) => {
-      const session = await newThread(
-        projectRef,
-        options
-          ? {
-              envMode: options.envMode,
-              branch: options.branch,
-              worktreePath: null,
-              startFromOrigin: options.startFromOrigin,
-            }
-          : undefined,
-      ).then(
-        (result) => result,
-        () => null,
-      );
-      if (!session) return false;
-      useComposerDraftStore.getState().setPrompt(session.draftId, prompt);
-      if (options)
-        useComposerDraftStore
-          .getState()
-          .setModelSelection(session.draftId, options.modelSelection, {
-            explicit: true,
-            replaceOptions: true,
-          });
-      return true;
-    },
-    [newThread],
-  );
+  return async (projectRef, prompt, options) => {
+    const session = await newThread(
+      projectRef,
+      options
+        ? {
+            envMode: options.envMode,
+            branch: options.branch,
+            worktreePath: null,
+            startFromOrigin: options.startFromOrigin,
+          }
+        : undefined,
+    ).then(
+      (result) => result,
+      () => null,
+    );
+    if (!session) return false;
+    useComposerDraftStore.getState().setPrompt(session.draftId, prompt);
+    if (options)
+      useComposerDraftStore.getState().setModelSelection(session.draftId, options.modelSelection, {
+        explicit: true,
+        replaceOptions: true,
+      });
+    return true;
+  };
 }

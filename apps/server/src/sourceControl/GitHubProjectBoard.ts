@@ -52,7 +52,7 @@ const CONTENT_FIELDS = `number title url bodyText repository{ nameWithOwner }
 
 const PAGE_SIZE = 100;
 /** Items read per board: 10 pages. Past this the board is `truncated`. */
-export const MAX_BOARD_ITEMS = 1000;
+const MAX_BOARD_ITEMS = 1000;
 /** Longest body text sent to clients, which search it; the rest is cut here. */
 export const MAX_BODY_CHARS = 2000;
 /** Long enough to outlast a client's reconnect backoff, short enough that a refresh stays fresh. */
@@ -265,7 +265,7 @@ function linkedProjectsFromResponse(
 }
 
 /** The cursor of the next page of items, when the body says there is one. */
-export function nextItemsCursor(body: string): Option.Option<string> {
+function nextItemsCursor(body: string): Option.Option<string> {
   return decodeBoard(body).pipe(
     Option.flatMap(({ data: { node } }) =>
       node?.items?.pageInfo.hasNextPage === true && node.items.pageInfo.endCursor
@@ -342,7 +342,7 @@ const unreadable = (operation: string) =>
     detail: "GitHub returned a project board this app could not read.",
   });
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.gen(function* () {
   const repositoryIdentities = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
   const graphQlContext = yield* Effect.context<
@@ -419,10 +419,7 @@ export const make = Effect.gen(function* () {
       variables: { owner: repository.owner, name: repository.name },
     }).pipe(
       Effect.flatMap((body) =>
-        Option.match(linkedProjectsFromResponse(body), {
-          onNone: () => Effect.fail(unreadable(operation)),
-          onSome: Effect.succeed,
-        }),
+        Effect.fromOption(linkedProjectsFromResponse(body), () => unreadable(operation)),
       ),
     );
     // A remembered choice that no longer exists falls back to the first project.
@@ -442,10 +439,9 @@ export const make = Effect.gen(function* () {
       if (Option.isNone(next)) break;
       after = next.value;
     }
-    const board = yield* Option.match(projectBoardFromResponses(pages), {
-      onNone: () => Effect.fail(unreadable(operation)),
-      onSome: Effect.succeed,
-    });
+    const board = yield* Effect.fromOption(projectBoardFromResponses(pages), () =>
+      unreadable(operation),
+    );
     return { projects: linked, board };
   });
 
@@ -519,8 +515,16 @@ export const make = Effect.gen(function* () {
 
   return GitHubProjectBoard.of({
     getProjectBoard,
-    moveItem: (input) => forgetBoards(moveItem(input)),
-    setIssueState: (input) => forgetBoards(setIssueState(input)),
+    moveItem: Effect.fn("GitHubProjectBoard.moveItem")(function* (
+      input: MoveProjectBoardItemInput,
+    ) {
+      return yield* forgetBoards(moveItem(input));
+    }),
+    setIssueState: Effect.fn("GitHubProjectBoard.setIssueState")(function* (
+      input: SetProjectBoardIssueStateInput,
+    ) {
+      return yield* forgetBoards(setIssueState(input));
+    }),
   });
 });
 

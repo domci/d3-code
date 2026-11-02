@@ -89,18 +89,26 @@ describe("buildThreadActionMenuItems", () => {
     const copyChildren = (branch: string | null) =>
       buildThreadActionMenuItems({ ...baseState, branch }).find((item) => item.id === "copy")
         ?.children;
-    expect(copyChildren(null)?.map((c) => c.label)).toEqual(["Working directory", "Thread ID"]);
+    expect(copyChildren(null)?.map((c) => c.label)).toEqual([
+      "Working directory",
+      "Thread",
+      "Thread ID",
+    ]);
     expect(copyChildren("main")?.map((c) => c.label)).toEqual([
       "Working directory",
       "Branch name",
+      "Thread",
       "Thread ID",
     ]);
   });
 
-  it("disables archive while the thread is running", () => {
-    const archiveItem = buildThreadActionMenuItems({ ...baseState, isRunning: true }).find(
-      (item) => item.id === "archive",
-    );
-    expect(archiveItem?.disabled).toBe(true);
+  it("disables archive and turning into a project while the thread is running", () => {
+    const items = buildThreadActionMenuItems({
+      ...baseState,
+      isRunning: true,
+      canTurnIntoProject: true,
+    });
+    expect(items.find((item) => item.id === "archive")?.disabled).toBe(true);
+    expect(items.find((item) => item.id === "turn-into-project")?.disabled).toBe(true);
   });
 });

@@ -9,7 +9,6 @@ import { useNavigate } from "@tanstack/react-router";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
 import { AsyncResult } from "effect/reactivity";
-import { useCallback } from "react";
 
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { newThreadId, randomUUID } from "../lib/utils";
@@ -56,112 +55,102 @@ export function useForkThread() {
     reportFailure: false,
   });
 
-  return useCallback(
-    async (input: ForkThreadInput) => {
-      const { environmentId } = input;
-      const targetThreadId = newThreadId();
-      const targetThreadRef = scopeThreadRef(environmentId, targetThreadId);
-      const result = await forkThread({
-        environmentId,
-        input: {
-          sourceThreadId: input.sourceThreadId,
-          targetThreadId,
-          ...(input.runId === undefined ? {} : { runId: input.runId }),
-          title: input.title,
-        },
-      });
-      if (result._tag === "Failure") {
-        if (!isAtomCommandInterrupted(result)) {
-          const error = squashAtomCommandFailure(result);
-          input.reportError(error instanceof Error ? error.message : null);
-        }
-        return;
+  return async (input: ForkThreadInput) => {
+    const { environmentId } = input;
+    const targetThreadId = newThreadId();
+    const targetThreadRef = scopeThreadRef(environmentId, targetThreadId);
+    const result = await forkThread({
+      environmentId,
+      input: {
+        sourceThreadId: input.sourceThreadId,
+        targetThreadId,
+        ...(input.runId === undefined ? {} : { runId: input.runId }),
+        title: input.title,
+      },
+    });
+    if (result._tag === "Failure") {
+      if (!isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        input.reportError(error instanceof Error ? error.message : null);
       }
-      const targetThreadReady = await waitForThreadShell(targetThreadRef);
-      if (!targetThreadReady) {
-        input.reportError(
-          "The fork was created, but its thread data did not reach this client. Reconnect and try opening it from the sidebar.",
-        );
-        return;
-      }
-      if (input.newWorktree) {
-        // The fork exists on the source's worktree already, so a failure below still opens it.
-        const projectCwd = input.projectCwd;
-        const reasonOf = (failed: { readonly cause: Cause.Cause<unknown> }) => {
-          const error = squashAtomCommandFailure(failed);
-          return error instanceof Error ? error.message : "unknown error";
-        };
-        let setupFailure: string | null = null;
-        if (!projectCwd) {
-          setupFailure = "the project is unavailable";
+      return;
+    }
+    const targetThreadReady = await waitForThreadShell(targetThreadRef);
+    if (!targetThreadReady) {
+      input.reportError(
+        "The fork was created, but its thread data did not reach this client. Reconnect and try opening it from the sidebar.",
+      );
+      return;
+    }
+    if (input.newWorktree) {
+      // The fork exists on the source's worktree already, so a failure below still opens it.
+      const projectCwd = input.projectCwd;
+      const reasonOf = (failed: { readonly cause: Cause.Cause<unknown> }) => {
+        const error = squashAtomCommandFailure(failed);
+        return error instanceof Error ? error.message : "unknown error";
+      };
+      let setupFailure: string | null = null;
+      if (!projectCwd) {
+        setupFailure = "the project is unavailable";
+      } else {
+        const created = await createGitWorktree({
+          environmentId,
+          input: {
+            cwd: projectCwd,
+            refName: input.newWorktree.baseBranch,
+            newRefName: buildTemporaryWorktreeBranchName(randomUUID),
+            baseRefName: input.newWorktree.baseBranch,
+            path: null,
+          },
+        });
+        if (created._tag === "Failure") {
+          setupFailure = reasonOf(created);
         } else {
-          const created = await createGitWorktree({
+          const { path, refName } = created.value.worktree;
+          const pointed = await updateThreadMetadata({
             environmentId,
-            input: {
-              cwd: projectCwd,
-              refName: input.newWorktree.baseBranch,
-              newRefName: buildTemporaryWorktreeBranchName(randomUUID),
-              baseRefName: input.newWorktree.baseBranch,
-              path: null,
-            },
+            input: { threadId: targetThreadId, branch: refName, worktreePath: path },
           });
-          if (created._tag === "Failure") {
-            setupFailure = reasonOf(created);
-          } else {
-            const { path, refName } = created.value.worktree;
-            const pointed = await updateThreadMetadata({
+          if (pointed._tag === "Failure") {
+            setupFailure = reasonOf(pointed);
+            void removeGitWorktree({
               environmentId,
-              input: { threadId: targetThreadId, branch: refName, worktreePath: path },
+              input: { cwd: projectCwd, path, force: true },
             });
-            if (pointed._tag === "Failure") {
-              setupFailure = reasonOf(pointed);
-              void removeGitWorktree({
-                environmentId,
-                input: { cwd: projectCwd, path, force: true },
-              });
-            } else {
-              // The fork keeps its new worktree if the script fails; only say so.
-              const setup = await runWorktreeSetup({
-                environmentId,
-                input: { threadId: targetThreadId },
-              });
-              if (setup._tag === "Failure" && !isAtomCommandInterrupted(setup)) {
-                toastManager.add(
-                  stackedThreadToast({
-                    type: "error",
-                    title: "Worktree setup script did not start",
-                    description: reasonOf(setup),
-                  }),
-                );
-              }
+          } else {
+            // The fork keeps its new worktree if the script fails; only say so.
+            const setup = await runWorktreeSetup({
+              environmentId,
+              input: { threadId: targetThreadId },
+            });
+            if (setup._tag === "Failure" && !isAtomCommandInterrupted(setup)) {
+              toastManager.add(
+                stackedThreadToast({
+                  type: "error",
+                  title: "Worktree setup script did not start",
+                  description: reasonOf(setup),
+                }),
+              );
             }
           }
         }
-        if (setupFailure !== null) {
-          // A toast, not the source thread's error banner: the fork is opened right below.
-          toastManager.add(
-            stackedThreadToast({
-              type: "error",
-              title: "Fork is using the original worktree",
-              description: `Its new worktree could not be set up: ${setupFailure}`,
-            }),
-          );
-        }
       }
-      await navigate({
-        to: "/$environmentId/$threadId",
-        params: buildThreadRouteParams(targetThreadRef),
-      });
-    },
-    [
-      createGitWorktree,
-      forkThread,
-      navigate,
-      removeGitWorktree,
-      runWorktreeSetup,
-      updateThreadMetadata,
-    ],
-  );
+      if (setupFailure !== null) {
+        // A toast, not the source thread's error banner: the fork is opened right below.
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Fork is using the original worktree",
+            description: `Its new worktree could not be set up: ${setupFailure}`,
+          }),
+        );
+      }
+    }
+    await navigate({
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(targetThreadRef),
+    });
+  };
 }
 
 /**

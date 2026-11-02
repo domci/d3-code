@@ -31,14 +31,14 @@ import {
   deriveLogicalProjectKeyFromSettings,
   derivePhysicalProjectKey,
   selectProjectGroupingSettings,
-} from "~/logicalProject";
+} from "@t3tools/client-runtime/state/project-grouping";
 import { buildPhysicalToLogicalProjectKeyMap } from "~/sidebarProjectGrouping";
 import { useProjects } from "~/state/entities";
 import { usePrimaryEnvironmentId } from "~/state/environments";
 
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
-import { usePreparePullRequestThreadAction } from "~/lib/sourceControlActions";
+import { usePreparePullRequestThreadAction } from "~/state/sourceControlActions";
 import type { ReviewCommentContext } from "~/reviewCommentContext";
 import { pullRequestEnvironment } from "~/state/pullRequests";
 
@@ -142,19 +142,29 @@ export function usePullRequestActionRunner({
   reference: PullRequestRef | null;
   terminology: ChangeRequestTerminology;
   onSuccess?: (action: PullRequestAction) => void;
-  /** Small surfaces resolve repository settings on the click, not for every visible row. */
+  /** Resolve repository settings on click to avoid per-row reads. */
   resolveMergeMethod?: (detail: PullRequestDetail) => PullRequestMergeMethod;
 }) {
   const runAction = useAtomCommand(pullRequestEnvironment.runAction, {
     reportFailure: false,
   });
-  const [actionPending, setActionPending] = useState(false);
-  const pendingRef = useRef(false);
+  const pendingRef = useRef(new Set<string>());
+  const [pendingKeys, setPendingKeys] = useState<ReadonlySet<string>>(() => new Set());
+  const actionKey =
+    reference === null
+      ? null
+      : JSON.stringify([
+          environmentId,
+          reference.host ?? null,
+          reference.repository,
+          reference.number,
+        ]);
+  const actionPending = actionKey !== null && pendingKeys.has(actionKey);
 
   const perform = async (action: PullRequestAction, method?: PullRequestMergeMethod) => {
-    if (pendingRef.current || reference === null) return;
-    pendingRef.current = true;
-    setActionPending(true);
+    if (actionKey === null || reference === null || pendingRef.current.has(actionKey)) return;
+    pendingRef.current.add(actionKey);
+    setPendingKeys(new Set(pendingRef.current));
     const result = await runAction({
       environmentId,
       input: {
@@ -163,8 +173,8 @@ export function usePullRequestActionRunner({
         ...(method ? { mergeMethod: method } : resolveMergeMethod ? { resolveMergeMethod } : {}),
       },
     });
-    pendingRef.current = false;
-    setActionPending(false);
+    pendingRef.current.delete(actionKey);
+    setPendingKeys(new Set(pendingRef.current));
     if (result._tag === "Failure") {
       toastManager.add({
         type: "error",
@@ -327,7 +337,7 @@ export function usePullRequestHandoffs({
     environmentId,
     cwd: detail?.workspaceRoot ?? null,
   });
-  // One at a time whatever the key: they all check the same pull request out.
+  // Serialize all handoffs because they check out the same pull request.
   const [handoff, setHandoff] = useState<string | null>(null);
   // Prompt links hand over a URL alone, so the URL is what names the host.
   const terminology = (
@@ -335,10 +345,7 @@ export function usePullRequestHandoffs({
     sourceControlClients.get(undefined)
   ).changeRequest;
 
-  /**
-   * Nothing is checked out: asking a question is not a reason to move somebody's working tree
-   * or to make a worktree they did not ask for.
-   */
+  // Questions must not change checkouts or create worktrees.
   const openThreadWithTask = async (
     projectRef: ReturnType<typeof scopeProjectRef>,
     task: PullRequestThreadTask | null,
@@ -423,15 +430,12 @@ export function usePullRequestHandoffs({
       return;
     }
     setHandoff(kind);
-    // It carries no timeout of its own: a loading toast never expires, and an explicit one
-    // would survive the update and pin the result on screen.
+    // Explicit timeouts survive toast updates and would pin the result after loading.
     const toastId = toastManager.add({
       type: "loading",
       title: `Preparing the ${terminology.singular} checkout...`,
     });
-    // The thread is opened before the checkout rather than after it, because the project's setup
-    // script only runs for a checkout that knows which thread it is for — and a worktree with no
-    // dependencies installed is not something anyone can test.
+    // Checkout setup requires the thread to exist first.
     const opened = await newThread(projectRef).then(
       (session) => session,
       () => null,

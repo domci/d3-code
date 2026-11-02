@@ -10,6 +10,7 @@ import { type RepositoryIdentity, SourceControlProviderKind } from "@t3tools/con
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as GitHubApi from "@t3tools/source-control-github/server/GitHubRequestPolicy";
 import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
+import * as GitHubAppSignIn from "@t3tools/source-control-github/server/GitHubAppSignIn";
 import * as GitHubCredentials from "@t3tools/source-control-github/server/GitHubCredentials";
 import * as GitHubQuota from "@t3tools/source-control-github/server/GitHubQuota";
 import * as SourceControlRateLimit from "@t3tools/source-control-core/server/SourceControlRateLimit";
@@ -203,6 +204,13 @@ function makeService(
               source: "gh" as const,
               fingerprint: "test",
             }),
+          saved: () => Effect.succeedNone,
+          fingerprint: (host, token) => Effect.succeed(`${host}:${token}`),
+          invalidate: () => Effect.void,
+        }),
+        Layer.mock(GitHubAppSignIn.GitHubAppSignIn)({
+          enabled: false,
+          token: () => Effect.succeedNone,
           invalidate: () => Effect.void,
         }),
         GitHubQuota.layer,

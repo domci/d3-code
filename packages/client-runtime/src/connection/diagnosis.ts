@@ -123,7 +123,7 @@ function headline(host: string, located: Located, failure: ConnectionAttemptErro
         ? "D3 Connect did not accept this device's sign-in"
         : "This device can't reach D3 Connect";
     case "tunnel":
-      // The relay already reached the host when this device fails on its own (#17629).
+      // The relay already reached the host when this device fails on its own.
       return failure?.reason === "network" ||
         failure?.reason === "transport" ||
         failure?.reason === "timeout"
@@ -137,7 +137,7 @@ function headline(host: string, located: Located, failure: ConnectionAttemptErro
 }
 
 function steps(host: string, located: Located, failure: ConnectionAttemptError | null): string[] {
-  const checkHost = `On ${host}, check Settings > Connections or run \`t3 connect status\`.`;
+  const checkHost = `On ${host}, check Settings > Sharing & access or run \`t3 connect status\`.`;
   switch (located.cause) {
     case "offline":
       return ["Connect this device to the internet. D3 Code reconnects on its own."];
@@ -148,7 +148,7 @@ function steps(host: string, located: Located, failure: ConnectionAttemptError |
     case "not_linked":
       return [
         "Check that this device is signed in to the same D3 Connect account as the host.",
-        `On ${host}, open Settings > Connections and turn D3 Connect on.`,
+        `On ${host}, open Settings > Sharing & access and turn D3 Connect on.`,
       ];
     case "tunnel_pending":
       return ["Wait a minute. D3 Code retries on its own.", checkHost];
@@ -158,7 +158,7 @@ function steps(host: string, located: Located, failure: ConnectionAttemptError |
         "If it keeps failing, copy the diagnostics and report it.",
       ];
     case "tunnel_not_enabled":
-      return [`On ${host}, open Settings > Connections and turn D3 Connect on.`];
+      return [`On ${host}, open Settings > Sharing & access and turn D3 Connect on.`];
     case "released":
     case "tunnel_down":
       return [

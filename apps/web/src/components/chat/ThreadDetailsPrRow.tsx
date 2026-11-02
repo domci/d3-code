@@ -1,3 +1,4 @@
+import { resolvePullRequestDetailChecks } from "@t3tools/client-runtime/pull-request-checks";
 import {
   capitalizeTerm,
   sourceControlClients,
@@ -36,7 +37,6 @@ import {
   buildFixFindingsHandoff,
   buildResolveConflictsPrompt,
   classifyPullRequestChecks,
-  resolvePullRequestDetailChecks,
   describePullRequestChecks,
   isPullRequestConflicting,
   resolvePullRequestMergeMethod,
@@ -82,7 +82,7 @@ import {
   THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS,
 } from "./threadDetailsPanelStyles";
 
-// A server without checks for this pull request answers null; polling it again finds nothing new.
+// A null checks response is settled; polling cannot find checks.
 const isSettledWithoutChecks = (result: AsyncResult.AsyncResult<unknown, unknown>) =>
   result._tag === "Success" && result.value === null;
 
@@ -121,8 +121,7 @@ export function ThreadDetailsPrRow({
   sourceWorkspace?: PullRequestHandoffWorkspace | null;
 }) {
   const serverConfigs = useServerConfigs();
-  const supportsPullRequests =
-    serverConfigs.get(environmentId)?.environment.capabilities.pullRequests === true;
+  const supportsPullRequests = serverConfigs.get(environmentId) !== undefined;
   const repository = sourceControlClients.repositorySelector(project?.repositoryIdentity);
   const reference: PullRequestRef | null =
     supportsPullRequests && project !== null
@@ -139,8 +138,7 @@ export function ThreadDetailsPrRow({
           environmentId,
           input: { ...reference, allowStale: false },
         });
-  // Read the queries part by part: every poll publishes a new result (a new
-  // timestamp, `waiting` on and off) even when nothing in it changed.
+  // Select query parts because polling rebuilds unchanged results.
   const detailData = useEnvironmentQuerySelector(detailAtom, selectEnvironmentQueryData);
   const detailQuery = useEnvironmentQueryRefresh(detailAtom);
   const supportsChecks =
@@ -436,7 +434,8 @@ export function ThreadDetailsPrRow({
       </Tooltip>
     ) : null;
 
-  const openRow = (text: string, part: "row" | "primary") => (
+  // The title row wraps to two lines; a conventional-commit prefix eats most of one line.
+  const openRow = (text: string, part: "row" | "primary", wrap = false) => (
     <Tooltip>
       <TooltipTrigger
         render={
@@ -445,6 +444,8 @@ export function ThreadDetailsPrRow({
             variant="ghost"
             size="sm"
             part={part}
+            multiline={wrap}
+            className={wrap ? "items-start [&>svg]:mt-0.5" : undefined}
             aria-label={openAriaLabel}
             onClick={onOpen}
             onAuxClick={onOpen}
@@ -452,7 +453,14 @@ export function ThreadDetailsPrRow({
         }
       >
         {icon}
-        <span className={cn("min-w-0 flex-1 truncate text-left", THREAD_DETAILS_PANEL_LABEL_CLASS)}>
+        <span
+          className={cn(
+            "min-w-0 flex-1 text-left",
+            wrap
+              ? "line-clamp-2 whitespace-normal leading-4.5"
+              : cn("truncate", THREAD_DETAILS_PANEL_LABEL_CLASS),
+          )}
+        >
           {text}
         </span>
       </TooltipTrigger>
@@ -465,9 +473,9 @@ export function ThreadDetailsPrRow({
   return (
     <>
       {detail !== null && (showChecks || trailingAction !== null || watching) ? (
-        <div className="pb-2">
-          {openRow(detail.title, "row")}
-          <div className="-mt-1 flex h-6 min-w-0 items-center gap-0.5 ps-9 pe-1 text-xs text-muted-foreground">
+        <div className="pb-1.5">
+          {openRow(detail.title, "row", true)}
+          <div className="mt-1.5 flex h-5 min-w-0 items-center gap-0.5 ps-9 pe-2.5 text-xs text-muted-foreground">
             <span className="me-1 shrink-0 tabular-nums">#{number}</span>
             {showChecks && checksRollup !== null ? (
               <PullRequestChecksPopover

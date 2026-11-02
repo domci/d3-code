@@ -67,6 +67,7 @@ export const ThreadComposerStatus = memo(function ThreadComposerStatus(props: {
         <ScrollView className="max-h-40" keyboardShouldPersistTaps="handled">
           <View className="gap-2 px-2 pb-2">
             {progress.steps.map((step, index) => (
+              // oxlint-disable-next-line react/no-array-index-key -- the checklist is positional and step texts can repeat
               <Text key={`${index}:${step.step}`} className="text-xs text-foreground-muted">
                 {step.status === "inProgress"
                   ? "Running"

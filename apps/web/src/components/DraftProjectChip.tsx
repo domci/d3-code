@@ -1,14 +1,14 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { ChevronDownIcon, FolderIcon } from "lucide-react";
-import { memo, useMemo, useState } from "react";
+import { memo, useState } from "react";
 
 import { useClientSettings } from "~/hooks/useSettings";
 import { useScratchProject } from "~/hooks/useScratchProject";
 import {
   deriveLogicalProjectKeyFromSettings,
   selectProjectGroupingSettings,
-} from "~/logicalProject";
+} from "@t3tools/client-runtime/state/project-grouping";
 import { useProjects } from "~/state/entities";
 import type { DraftId } from "../composerDraftStore";
 import { useComposerMenuProps } from "./chat/composerEventScope";
@@ -43,19 +43,15 @@ export const DraftProjectChip = memo(function DraftProjectChip({
   const selectDraftProject = useSelectDraftProject(draftId);
   const [query, setQuery] = useState("");
   const scratchRoot = scratchWorkspaceRootFor(environmentId);
-  const options = useMemo(
-    () =>
-      projects
-        .filter(
-          (project) =>
-            project.environmentId === environmentId && !isScratchProject(project, scratchRoot),
-        )
-        .map((project) => ({
-          project,
-          key: deriveLogicalProjectKeyFromSettings(project, groupingSettings),
-        })),
-    [environmentId, groupingSettings, projects, scratchRoot],
-  );
+  const options = projects
+    .filter(
+      (project) =>
+        project.environmentId === environmentId && !isScratchProject(project, scratchRoot),
+    )
+    .map((project) => ({
+      project,
+      key: deriveLogicalProjectKeyFromSettings(project, groupingSettings),
+    }));
   const active = options.find(({ project }) => project.id === projectId);
   const needle = query.trim().toLowerCase();
   const filtered = options.filter(({ project }) => project.title.toLowerCase().includes(needle));

@@ -35,6 +35,10 @@
       "types": "./src/server/GitHubRest.ts",
       "import": "./src/server/GitHubRest.ts"
     },
+    "./server/GitHubAppSignIn": {
+      "types": "./src/server/GitHubAppSignIn.ts",
+      "import": "./src/server/GitHubAppSignIn.ts"
+    },
     "./server/GitHubPullRequestApi": {
       "types": "./src/server/GitHubPullRequestApi.ts",
       "import": "./src/server/GitHubPullRequestApi.ts"

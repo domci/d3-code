@@ -1,4 +1,4 @@
-import { useNavigation } from "@react-navigation/native";
+import type { MenuAction } from "@react-native-menu/menu";
 import {
   startThreadPrompt,
   type BoardCardItem,
@@ -22,7 +22,7 @@ import {
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { AsyncResult } from "effect/reactivity";
 import { useCallback, useEffect, useState } from "react";
-import { Platform, ScrollView, View } from "react-native";
+import { ScrollView, View } from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { Button } from "../../components/ui/Button";
@@ -31,10 +31,12 @@ import { ListChoiceRow } from "../../components/ui/ListChoiceRow";
 import { ListSection } from "../../components/ui/ListSection";
 import { Sheet } from "../../components/ui/Sheet";
 import { makeTurnCommandMetadata } from "../../lib/commandMetadata";
+import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
 import {
-  buildModelMenuActions,
   buildModelOptions,
   groupByProvider,
+  type ModelOption,
+  type ProviderGroup,
   resolveDefaultableModelSelection,
   resolveNewTaskModelSelection,
 } from "../../lib/modelOptions";
@@ -50,7 +52,57 @@ import {
 } from "../../state/use-composer-drafts";
 import { vcsEnvironment } from "../../state/vcs";
 import { ListFilterMenu } from "../workspace/ListFilterMenu";
-import { useAndroidWorkspaceSelection } from "../workspace/useAndroidWorkspaceSelection";
+
+// Upstream dropped these with its last other caller; the board model picker still needs them.
+function modelMenuAction(option: ModelOption, selectedModel: ModelSelection | null): MenuAction {
+  return {
+    id: `model:${option.key}`,
+    title: option.label,
+    state:
+      option.selection.instanceId === selectedModel?.instanceId &&
+      option.selection.model === selectedModel.model
+        ? "on"
+        : undefined,
+  };
+}
+
+function buildModelMenuActions(
+  groups: ReadonlyArray<ProviderGroup>,
+  selectedModel: ModelSelection | null,
+): MenuAction[] {
+  return groups.flatMap((group) => {
+    const currentModels = group.models.filter((model) => !model.isLegacy);
+    const legacyModels = group.models.filter((model) => model.isLegacy);
+    const selected = group.models.find(
+      (model) =>
+        model.selection.instanceId === selectedModel?.instanceId &&
+        model.selection.model === selectedModel.model,
+    );
+
+    return [
+      ...(currentModels.length > 0
+        ? [
+            {
+              id: `provider:${group.providerKey}`,
+              title: group.providerLabel,
+              subtitle: selected && !selected.isLegacy ? selected.label : undefined,
+              subactions: currentModels.map((option) => modelMenuAction(option, selectedModel)),
+            },
+          ]
+        : []),
+      ...(legacyModels.length > 0
+        ? [
+            {
+              id: `legacy-models:${group.providerKey}`,
+              title: `${group.providerLabel} legacy models`,
+              subtitle: selected?.isLegacy ? selected.label : undefined,
+              subactions: legacyModels.map((option) => modelMenuAction(option, selectedModel)),
+            },
+          ]
+        : []),
+    ];
+  });
+}
 
 type Repository = BoardRepository<EnvironmentProject>;
 type WorkspaceMode = "local" | "worktree";
@@ -73,8 +125,7 @@ export function BoardThreadSheet(props: {
   readonly onStarted: (items: ReadonlyArray<BoardCardItem>) => void;
 }) {
   const { items } = props;
-  const navigation = useNavigation();
-  const selectAndroidWorkspace = useAndroidWorkspaceSelection();
+  const selectDetail = useSelectWorkspaceDetail();
   const [grouping, setGrouping] = useState<"one" | "separate">("one");
   const [threadRepoKey, setThreadRepoKey] = useState(items[0]!.repoKey);
   const [submitting, setSubmitting] = useState(false);
@@ -190,9 +241,7 @@ export function BoardThreadSheet(props: {
     // Open the thread when there is just one; a batch shows up in the thread list.
     const only = result.value.length === 1 ? result.value[0]! : null;
     if (only === null) return;
-    if ("draftId" in only) navigation.navigate("Thread", { draft: only });
-    else if (Platform.OS === "android") selectAndroidWorkspace({ name: "Thread", params: only });
-    else navigation.navigate("Thread", only);
+    selectDetail({ name: "Thread", params: "draftId" in only ? { draft: only } : only });
   };
 
   return (
@@ -311,6 +360,7 @@ function EnvironmentSetup(props: {
   const workspaceMode = mode ?? settings.defaultThreadEnvMode ?? "worktree";
   const runtimeMode = settings.defaultRuntimeMode;
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- defaults come from this environment's settings and provider atoms, which the parent cannot read for a dynamic list of environments, so the resolved options are reported up for its Start and Draft buttons
   useEffect(() => {
     if (active)
       onChange(project.environmentId, { modelSelection: active, runtimeMode, workspaceMode });

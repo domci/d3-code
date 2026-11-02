@@ -2,16 +2,12 @@ import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, ModelSelection } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { StartThreadOptions } from "../../hooks/useStartThreadWithPrompt";
 import { useEnvironmentSettings } from "../../hooks/useSettings";
 import { getCustomModelOptionsByInstance } from "../../modelSelection";
-import {
-  applyProviderInstanceSettings,
-  deriveProviderInstanceEntries,
-  sortProviderInstanceEntries,
-} from "../../providerInstances";
+import { providerInstanceEntriesFor } from "../../providerInstances";
 import { useProjects } from "../../state/entities";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
@@ -36,13 +32,13 @@ export function BoardThreadSetup(props: {
 }) {
   const [options, setOptions] = useState<ReadonlyMap<EnvironmentId, StartThreadOptions>>(new Map());
   // Child effects report on every render; skipping equal values keeps that from looping.
-  const changeOptions = useCallback((environmentId: EnvironmentId, value: StartThreadOptions) => {
+  const changeOptions = (environmentId: EnvironmentId, value: StartThreadOptions) => {
     setOptions((current) =>
       JSON.stringify(current.get(environmentId)) === JSON.stringify(value)
         ? current
         : new Map(current).set(environmentId, value),
     );
-  }, []);
+  };
   const environments = [
     ...new Map(props.projects.map((project) => [project.environmentId, project])).values(),
   ];
@@ -88,9 +84,7 @@ function EnvironmentSetup({
   const providers =
     useAtomValue(serverEnvironment.providersValueAtom(project.environmentId)) ??
     EMPTY_SERVER_PROVIDERS;
-  const entries = sortProviderInstanceEntries(
-    applyProviderInstanceSettings(deriveProviderInstanceEntries(providers), settings, project.id),
-  );
+  const entries = providerInstanceEntriesFor(providers, settings, project.id);
   const defaults = resolveProjectSettings(settings, project.id, project).settings;
   const [selection, setSelection] = useState<ModelSelection | null>(null);
   const active =
@@ -112,6 +106,7 @@ function EnvironmentSetup({
   const modelOptions = active
     ? getCustomModelOptionsByInstance(settings, providers, active.instanceId, active.model)
     : new Map();
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- defaults come from this environment's settings and provider atoms, which the parent cannot read for a dynamic list of environments, so the resolved options are reported up for its Start and Draft buttons
   useEffect(() => {
     if (active)
       onChange(project.environmentId, {
