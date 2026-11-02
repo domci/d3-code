@@ -1,0 +1,20 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.t3tools.voicetranscription'
+version = '0.0.0'
+
+android {
+  namespace 'expo.modules.t3voicetranscription'
+  defaultConfig {
+    versionCode 1
+    versionName '0.0.0'
+  }
+}
+
+dependencies {
+  // alpha2 ships Kotlin 2.4 metadata, newer than the app's compiler can read.
+  implementation 'com.google.mlkit:genai-speech-recognition:1.0.0-alpha1'
+}
