@@ -24,6 +24,13 @@ export interface AndroidHeaderAction {
   readonly subtitle?: string;
   readonly destructive?: boolean;
   readonly overflowOnly?: boolean;
+  readonly subactions?: ReadonlyArray<AndroidHeaderSubaction>;
+}
+
+export interface AndroidHeaderSubaction {
+  readonly title: string;
+  readonly subtitle?: string;
+  readonly onPress: () => void;
 }
 
 export function AndroidHeaderIconButton(props: {
@@ -185,10 +192,17 @@ export function AndroidScreenHeader(props: {
                       disabled: Boolean(action.disabled),
                       destructive: action.destructive,
                     },
+                    subactions: action.subactions?.map((subaction, subindex) => ({
+                      id: `${index}:${subindex}`,
+                      title: subaction.title,
+                      subtitle: subaction.subtitle,
+                    })),
                   }))}
-                  onPressAction={({ nativeEvent }) =>
-                    overflowActions[Number(nativeEvent.event)]?.onPress()
-                  }
+                  onPressAction={({ nativeEvent }) => {
+                    const [index, subindex] = nativeEvent.event.split(":").map(Number);
+                    const action = overflowActions[index!];
+                    (subindex === undefined ? action : action?.subactions?.[subindex])?.onPress();
+                  }}
                 >
                   {(open) => (
                     <IconButton

@@ -11,6 +11,14 @@ export interface AppBarAction {
   readonly loading?: boolean;
   readonly selected?: boolean;
   readonly tintColor?: ColorValue;
+  /** Android: list in the overflow menu only. */
+  readonly overflowOnly?: boolean;
+  readonly destructive?: boolean;
+  readonly subactions?: ReadonlyArray<{
+    readonly title: string;
+    readonly subtitle?: string;
+    readonly onPress: () => void;
+  }>;
 }
 
 export type AppBarMenuItem =

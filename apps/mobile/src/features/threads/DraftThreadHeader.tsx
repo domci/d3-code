@@ -57,6 +57,7 @@ export function DraftThreadHeader(props: {
       hasWorkspaceRoot={Boolean(props.project.workspaceRoot)}
       fileInspectorSupported={false}
       inspectorMode={null}
+      thread={null}
       onToggleInspector={openFiles}
       onOpenFilesInspector={openFiles}
       onOpenGitInspector={requiresThread}

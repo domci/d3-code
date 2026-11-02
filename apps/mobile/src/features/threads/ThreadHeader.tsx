@@ -7,6 +7,8 @@ import type { ThreadInspectorMode } from "./thread-inspector-content-stack";
 import { useThreadHeaderOptions } from "./useThreadHeaderOptions";
 import { useWorkspaceBackNavigation } from "../workspace/useAndroidWorkspaceNavigation";
 import { PullRequestGlyph } from "../pull-requests/pullRequestGlyphs";
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import { useThreadMenuActions } from "./useThreadMenuActions";
 
 export function ThreadHeader(
   props: Parameters<typeof useThreadHeaderOptions>[0] & {
@@ -17,6 +19,7 @@ export function ThreadHeader(
     readonly onToggleInspector: () => void;
     readonly onOpenGitInspector: () => void;
     readonly onOpenFilesInspector: () => void;
+    readonly thread: EnvironmentThreadShell | null;
   },
 ) {
   const goBack = useWorkspaceBackNavigation("threads");
@@ -24,6 +27,7 @@ export function ThreadHeader(
     useAdaptiveWorkspaceLayout();
   const { onOpenTerminal, onMergeBack } = props.gitControls;
   const native = useThreadHeaderOptions(props);
+  const threadMenu = useThreadMenuActions(props.thread, goBack);
   const androidHeaderActions = useMemo<ReadonlyArray<AppBarAction>>(() => {
     const actions: AppBarAction[] = [];
     if (props.onReturnToThread) {
@@ -61,8 +65,10 @@ export function ThreadHeader(
         onPress: onMergeBack,
       });
     }
+    actions.push(...threadMenu.actions);
     return actions;
   }, [
+    threadMenu.actions,
     props.inspectorMode,
     panes.auxiliaryPaneVisible,
     props.onOpenFilesInspector,
@@ -104,6 +110,7 @@ export function ThreadHeader(
         compact={composerKeyboardActive}
       />
       {native.fallback}
+      {threadMenu.sheet}
     </>
   );
 }
