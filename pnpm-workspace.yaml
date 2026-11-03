@@ -78,7 +78,7 @@ catalog:
   tailwindcss: 4.3.3
   tldts: 7.4.2
   typescript: npm:@tsc-rs/typescript@0.8.0
-  undici: 8.11.2
+  undici: 8.12.2
   vite: npm:@voidzero-dev/vite-plus-core@1.4.0
   vite-plus: 1.4.0
   ws: 8.22.0
@@ -229,6 +229,31 @@ minimumReleaseAgeExclude:
   - agent-device@0.21.32
 
 overrides:
+  # Keep security fixes on the current release lines where possible. Validate
+  # dbus-next XML parsing, Xcode UUID generation, and Markdown math on upgrades.
+  "dbus-next>xml2js": 0.6.2
+  "xcode>uuid": 11.1.1
+  "valibot@>=1.0.0 <1.4.2": 1.4.2
+  "katex@>=0.11.0 <0.18.2": 0.18.2
+  "electron@>=44.0.0 <44.9.1": 44.9.1
+  "zod@>=4.0.0 <4.6.7": 4.6.7
+  "body-parser@>=2.0.0 <2.4.0": 2.4.0
+  "undici@>=6.0.0 <6.29.1": 6.29.1
+  "undici@>=7.0.0 <7.30.1": 7.30.1
+  "fast-uri@>=3.0.0 <3.1.9": 3.1.9
+  # Constrain security fixes to the affected compatible release lines.
+  "seroval@>=1.0.0 <1.6.3": 1.6.3
+  "proxy-addr@>=2.0.0 <2.0.8": 2.0.8
+  "shell-quote@>=1.8.4 <1.11.0": 1.11.0
+  "dompurify@>=3.0.0 <3.4.17": 3.4.17
+  "@modelcontextprotocol/sdk@>=1.0.0 <1.32.0": 1.32.0
+  "http-cache-semantics@>=4.0.0 <4.2.1": 4.3.0
+  "source-map-js@>=1.0.0 <1.2.2": 1.2.2
+  "sharp@>=0.35.0 <0.35.5": 0.35.5
+  "path-to-regexp@>=6.0.0 <6.3.0": 6.3.0
+  "smol-toml@>=1.0.0 <1.8.1": 1.9.1
+  "hono@>=4.0.0 <4.13.11": 4.13.13
+  "ip-address@>=10.0.0 <10.7.4": 10.7.4
   # Pin every patched package, including transitive dependencies, so lockfile-free
   # release installs cannot drift past the patch. Update these with patchedDependencies.
   react-native-image-viewing: 0.2.2
@@ -259,6 +284,7 @@ overrides:
   "@expo/fingerprint": 0.21.5
   app-builder-lib: 26.16.1
   expo-modules-core: 58.0.22
+
   # Keep jsdom's optional peer consistent so Vite+ has one test-runner instance.
   "@exodus/bytes>@noble/hashes": "1.8.0"
   # Earlier React Navigation declarations create a circular type alias in TypeScript 7.
