@@ -1,15 +1,9 @@
 #!/usr/bin/env node
 
-// Keeps the D3 keyboard inside Android's adaptive and splash safe zones.
-//
-// Full application artwork contains a rounded-square silhouette. Android masks the
-// central 72dp of a 108dp adaptive canvas, so it needs the transparent keyboard master
-// over a full-bleed channel background instead of a second rounded-square frame.
-//
-// The Android 12+ splash screen masks its icon to a circle covering the central two thirds
-// of a 288dp canvas, which is the same proportion the launcher crops. Composing the two
-// adaptive layers into one 288dp image therefore makes the splash frame the wordmark
-// exactly like the launcher icon does.
+// Android masks the central 72dp of a 108dp adaptive canvas, so it gets the transparent keyboard
+// master over a full-bleed background, not the rounded-square artwork. The Android 12+ splash masks
+// the central two thirds of 288dp, the launcher's proportion, so composing both adaptive layers
+// into one 288dp image frames the splash like the launcher icon.
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -65,8 +59,7 @@ const wordmarkTransform = (size: number) => {
 const canvasSvg = (size: number, inner: string) =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" fill="none">${inner}</svg>`;
 
-// The layer sources clip to a 10pt rounded rectangle for the iOS silhouette. Android
-// applies its own mask, so the layer must bleed to the canvas edge.
+// Remove the iOS 10pt corner clip; Android's own mask needs full bleed.
 const fullBleed = (svg: string) =>
   svg.replace(/<rect width="128" height="128" rx="10"\/>/, '<rect width="128" height="128"/>');
 
@@ -150,8 +143,7 @@ const renderNightlyBackground = Effect.fn("androidIcons.renderNightlyBackground"
   repositoryRoot: string,
   size: number,
 ) {
-  // Positions mirror assets/nightly/app-icon.icon/icon.json. The SVG blur filter is
-  // dropped because Icon Composer ignores it and it smears at this raster size.
+  // Match assets/nightly/app-icon.icon/icon.json; omit blur, which Icon Composer ignores and rasterization smears.
   const clouds = [
     { file: "cloud-lower-left.svg", scale: 25, translation: [-309.6375, 268.66077693836917] },
     {

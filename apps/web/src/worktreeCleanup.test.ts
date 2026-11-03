@@ -36,23 +36,6 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
 }
 
 describe("getOrphanedWorktreePathForThread", () => {
-  it("returns null when the target thread does not exist", () => {
-    const result = getOrphanedWorktreePathForThread([], ThreadId.make("missing-thread"));
-    expect(result).toBeNull();
-  });
-
-  it("returns null when the target thread has no worktree", () => {
-    const threads = [makeThread()];
-    const result = getOrphanedWorktreePathForThread(threads, ThreadId.make("thread-1"));
-    expect(result).toBeNull();
-  });
-
-  it("returns the path when no other thread links to that worktree", () => {
-    const threads = [makeThread({ worktreePath: "/tmp/repo/worktrees/feature-a" })];
-    const result = getOrphanedWorktreePathForThread(threads, ThreadId.make("thread-1"));
-    expect(result).toBe("/tmp/repo/worktrees/feature-a");
-  });
-
   it("returns null when another thread links to the same worktree", () => {
     const threads = [
       makeThread({
@@ -66,6 +49,29 @@ describe("getOrphanedWorktreePathForThread", () => {
     ];
     const result = getOrphanedWorktreePathForThread(threads, ThreadId.make("thread-1"));
     expect(result).toBeNull();
+  });
+
+  it.each([
+    ["/tmp/repo/worktrees/feature-a", "/tmp/repo/worktrees/feature-a/"],
+    ["/tmp/repo/worktrees/feature-a", "/tmp/repo/worktrees/feature-a//"],
+    ["C:\\repo\\worktrees\\feature-a", "c:/repo/worktrees/feature-a/"],
+  ])("treats %s and %s as the same worktree", (targetPath, otherPath) => {
+    const threads = [
+      makeThread({ id: ThreadId.make("thread-1"), worktreePath: targetPath }),
+      makeThread({ id: ThreadId.make("thread-2"), worktreePath: otherPath }),
+    ];
+    expect(getOrphanedWorktreePathForThread(threads, ThreadId.make("thread-1"))).toBeNull();
+    expect(getOrphanedWorktreePathForThread(threads, ThreadId.make("thread-2"))).toBeNull();
+  });
+
+  it("keeps case-sensitive POSIX worktrees apart", () => {
+    const threads = [
+      makeThread({ id: ThreadId.make("thread-1"), worktreePath: "/tmp/repo/worktrees/Feature" }),
+      makeThread({ id: ThreadId.make("thread-2"), worktreePath: "/tmp/repo/worktrees/feature" }),
+    ];
+    expect(getOrphanedWorktreePathForThread(threads, ThreadId.make("thread-1"))).toBe(
+      "/tmp/repo/worktrees/Feature",
+    );
   });
 
   it("ignores threads linked to different worktrees", () => {

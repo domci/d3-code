@@ -8,5 +8,6 @@ export type WsRpcProtocolClient =
   RpcClientFactory extends Effect.Effect<infer Client, any, any> ? Client : never;
 
 // Pings go out every 5 seconds, and a server busy for a few seconds stops
-// answering them. Allow 15 seconds without any frame before dropping the socket.
-export const PING_TIMEOUT = "15 seconds";
+// answering them, and mobile links stall for longer. Allow 30 seconds without any
+// frame before dropping the socket.
+export const PING_TIMEOUT = "30 seconds";

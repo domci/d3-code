@@ -10,13 +10,8 @@ import { attachmentEnvironment } from "../state/attachments";
 import { readEnvironmentScope, readPreparedConnection } from "../state/session";
 import { uploadBytes } from "./attachmentUploadQueue";
 
-export const PROJECT_ICON_MAX_BYTES = 1024 * 1024;
-export const PROJECT_ICON_MIME_TYPES = [
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-  "image/gif",
-] as const;
+const PROJECT_ICON_MAX_BYTES = 1024 * 1024;
+const PROJECT_ICON_MIME_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;
 type ProjectIconMimeType = (typeof PROJECT_ICON_MIME_TYPES)[number];
 
 export function validateProjectIconFile(file: File): string | null {

@@ -1,14 +1,16 @@
-import type * as Path from "effect/Path";
+import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 
 import { temporaryWorktreeToken } from "@t3tools/shared/git";
 
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 
-/**
- * Null when the setting is not an absolute path on this machine, such as `D:\worktrees`
- * configured for a Windows server and synced to a Linux one, or when it is a filesystem root,
- * which would make every path on that drive look managed.
- */
+import * as ServerConfig from "./config.ts";
+import * as ServerSettings from "./serverSettings.ts";
+
+/** Null for filesystem roots or settings not absolute on this host, including synced foreign-platform paths. */
 export function resolveWorktreesDirectory(
   setting: string,
   defaultDir: string,
@@ -45,12 +47,10 @@ export function managedWorktreesDirectories(
 }
 
 /**
- * `<parentDir>/<id>/<repo>`. The last segment is the repository directory name
- * so vendor apps that group sessions by working-directory leaf (Codex) file D3
- * worktrees under the right project. `<id>` is the temporary branch's 8-hex
- * token, else the sanitized branch name; `suffix` disambiguates a collision.
- * Worktrees created before this layout live at `<repo>/<branch>`; everything
- * that recognises managed worktrees checks containment, so both work.
+ * `<parentDir>/<id>/<repo>`: the repo leaf lets apps that group sessions by cwd leaf (Codex) file
+ * worktrees under the right project. `<id>` is the temp branch's 8-hex token, else the sanitized
+ * branch; `suffix` breaks collisions. Older worktrees at `<repo>/<branch>` still work because
+ * managed-worktree checks use containment.
  */
 export function buildWorktreePath(
   parentDir: string,
@@ -62,3 +62,60 @@ export function buildWorktreePath(
   const id = temporaryWorktreeToken(branch) ?? branch.replace(/\//g, "-");
   return path.join(parentDir, suffix ? `${id}-${suffix}` : id, repoName);
 }
+
+/**
+ * A thread's path and branch can come from a client, so a missing worktree is
+ * only recreated where the server would have put it:
+ * `<managed worktrees folder>/<id>/<repo>` (or `<repo>/<branch>` from before that
+ * layout), compared by real path.
+ */
+export const makeIsManagedWorktreePath = Effect.gen(function* () {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const serverConfig = yield* ServerConfig.ServerConfig;
+  const serverSettings = yield* ServerSettings.ServerSettingsService;
+
+  // Match Git's symlink-following location: nearest real ancestor plus missing path components.
+  const realLocation = (target: string): Effect.Effect<string> =>
+    fileSystem.realPath(target).pipe(
+      Effect.catch(() => {
+        const parent = path.dirname(target);
+        return parent === target
+          ? Effect.succeed(target)
+          : Effect.map(realLocation(parent), (real) => path.join(real, path.basename(target)));
+      }),
+    );
+
+  return Effect.fn("worktreesDirectory.isManagedWorktreePath")(function* (worktreePath: string) {
+    // git resolves a relative path against the project, not the server cwd.
+    if (!path.isAbsolute(worktreePath)) return false;
+    // Require normalized paths; Git and realPath disagree on .. after symlink traversal.
+    if (path.resolve(worktreePath) !== worktreePath) return false;
+    const settings = yield* serverSettings.getSettings.pipe(
+      Effect.orElseSucceed(() => ({
+        worktreesDirectory: "",
+        previousWorktreesDirectories: [],
+      })),
+    );
+    const roots = yield* Effect.forEach(
+      managedWorktreesDirectories(
+        settings,
+        serverConfig.worktreesDir,
+        path,
+        yield* HostProcess.HomeDirectory,
+      ),
+      realLocation,
+    );
+    const candidate = yield* realLocation(worktreePath);
+    return roots.some((root) => {
+      if (isFilesystemRoot(root, path)) return false;
+      const relative = path.relative(root, candidate);
+      const segments = relative.split(path.sep);
+      return (
+        !path.isAbsolute(relative) &&
+        segments.length === 2 &&
+        segments.every((segment) => segment !== "" && segment !== "..")
+      );
+    });
+  });
+});

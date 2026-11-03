@@ -1,11 +1,16 @@
+import type { ContextMenuItem } from "@t3tools/contracts";
 import type { SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import {
   planPinnedReorder,
   sortActiveThreadsByOrderKey,
+  sortThreads,
 } from "@t3tools/client-runtime/state/thread-sort";
 
-import { sortThreads } from "../lib/threadSort";
 import type { SidebarThreadSummary } from "../types";
+import type { ThreadStatusPill } from "./Sidebar.logic";
+
+const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
+const SIDEBAR_THREAD_PREWARM_LIMIT = 3;
 
 /** Stable split of an already-ordered thread list into active and settled threads. */
 export function partitionSettledThreads<T extends Pick<SidebarThreadSummary, "settledOverride">>(
@@ -20,7 +25,7 @@ export function partitionSettledThreads<T extends Pick<SidebarThreadSummary, "se
 }
 
 /** Deepest level of subagent nesting the tree sidebar indents; deeper ones list beside it. */
-export const MAX_SUBAGENT_TREE_DEPTH = 3;
+const MAX_SUBAGENT_TREE_DEPTH = 3;
 
 type SubagentTreeThread = Pick<
   SidebarThreadSummary,
@@ -31,13 +36,10 @@ const subagentTreeKey = (thread: Pick<SidebarThreadSummary, "id" | "environmentI
   `${thread.environmentId}:${thread.id}`;
 
 /**
- * Attaches subagent threads under their parent. `roots` are the non-subagent threads in the
- * incoming order; `childrenByParentKey` maps `${environmentId}:${threadId}` to that thread's
- * children in incoming order. Subagents whose parent is not in `threads` are dropped.
- * A fork nests under its source the same way, but only when the source is in `threads`, is not
- * a subagent (those fold away or drop, and a fork is a full session that must stay listed) and is
- * on the same side of the active/settled split; otherwise it stays a root (shown with a fork mark).
- * Nesting beyond `maxDepth` levels is listed beside the deepest level instead of going deeper.
+ * Attaches subagents under their parent, dropping those whose parent is not in `threads`. A fork
+ * nests under its source only when the source is listed, is not a subagent, and is on the same side
+ * of the active/settled split; otherwise it stays a root, since a fork must stay listed.
+ * Nesting beyond `maxDepth` is listed beside the deepest level.
  */
 export function buildSubagentTree<T extends SubagentTreeThread>(
   threads: readonly T[],
@@ -243,4 +245,100 @@ export function sortProjectsByCreation<T extends { readonly createdAt: string }>
     .map((project) => ({ project, ms: Date.parse(project.createdAt) || 0 }))
     .sort((left, right) => left.ms - right.ms)
     .map(({ project }) => project);
+}
+
+const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
+  "Pending Approval": 5,
+  "Awaiting Input": 4,
+  "Guest Request": 3.75,
+  Failed: 3.5,
+  Working: 3,
+  Connecting: 3,
+  Waiting: 2.5,
+  "Plan Ready": 2,
+  Completed: 1,
+};
+
+export function resolveProjectStatusIndicator(
+  statuses: ReadonlyArray<ThreadStatusPill | null>,
+): ThreadStatusPill | null {
+  let highestPriorityStatus: ThreadStatusPill | null = null;
+  for (const status of statuses) {
+    if (status === null) continue;
+    if (
+      highestPriorityStatus === null ||
+      THREAD_STATUS_PRIORITY[status.label] > THREAD_STATUS_PRIORITY[highestPriorityStatus.label]
+    ) {
+      highestPriorityStatus = status;
+    }
+  }
+  return highestPriorityStatus;
+}
+
+export async function archiveSelectedThreadEntries<
+  TEntry extends { readonly threadKey: string },
+  TResult extends { readonly _tag: "Success" | "Failure" },
+>(input: {
+  entries: readonly TEntry[];
+  archive: (entry: TEntry, onArchived: () => void) => Promise<TResult>;
+}): Promise<{
+  archivedThreadKeys: readonly string[];
+  mutationFailure: Extract<TResult, { readonly _tag: "Failure" }> | null;
+  followupFailures: readonly Extract<TResult, { readonly _tag: "Failure" }>[];
+}> {
+  const archivedThreadKeys: string[] = [];
+  const followupFailures: Extract<TResult, { readonly _tag: "Failure" }>[] = [];
+
+  for (const entry of input.entries) {
+    let didArchive = false;
+    const result = await input.archive(entry, () => {
+      didArchive = true;
+    });
+    if (didArchive || result._tag === "Success") archivedThreadKeys.push(entry.threadKey);
+    if (result._tag === "Success") continue;
+    const failure = result as Extract<TResult, { readonly _tag: "Failure" }>;
+    if (didArchive) {
+      followupFailures.push(failure);
+      continue;
+    }
+    return { archivedThreadKeys, mutationFailure: failure, followupFailures };
+  }
+
+  return { archivedThreadKeys, mutationFailure: null, followupFailures };
+}
+
+export function buildMultiSelectThreadContextMenuItems(input: {
+  count: number;
+  hasRunningThread: boolean;
+}): readonly ContextMenuItem<"mark-unread" | "archive" | "delete">[] {
+  return [
+    { id: "mark-unread", label: `Mark unread (${input.count})` },
+    {
+      id: "archive",
+      label: `Archive (${input.count})`,
+      disabled: input.hasRunningThread,
+    },
+    { id: "delete", label: `Delete (${input.count})`, destructive: true },
+  ];
+}
+
+export function shouldClearThreadSelectionOnMouseDown(target: HTMLElement | null): boolean {
+  if (target === null) return true;
+  return !target.closest(THREAD_SELECTION_SAFE_SELECTOR);
+}
+
+export function getSidebarThreadIdsToPrewarm<TThreadId>(
+  visibleThreadIds: readonly TThreadId[],
+  limit = SIDEBAR_THREAD_PREWARM_LIMIT,
+): TThreadId[] {
+  return visibleThreadIds.slice(0, Math.max(0, limit));
+}
+
+export function isContextMenuPointerDown(input: {
+  button: number;
+  ctrlKey: boolean;
+  isMac: boolean;
+}): boolean {
+  if (input.button === 2) return true;
+  return input.isMac && input.button === 0 && input.ctrlKey;
 }

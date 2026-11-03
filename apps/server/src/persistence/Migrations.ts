@@ -66,8 +66,23 @@ import Migration0060 from "./Migrations/060_McpAppModelContext.ts";
 import Migration0061 from "./Migrations/061_ThreadSnapshotWindowIndexes.ts";
 import Migration0062 from "./Migrations/062_PullRequestReviewGuides.ts";
 import Migration0063 from "./Migrations/063_ThreadFailureLookupIndex.ts";
+import Migration0064 from "./Migrations/064_DropUnusedV1Projections.ts";
+import Migration0065 from "./Migrations/065_CanonicalizeThreadPullRequestLinks.ts";
+import Migration0066 from "./Migrations/066_CodexUsageNativeTurnIndex.ts";
+import Migration0067 from "./Migrations/067_RepairClientSettlementTimestamps.ts";
+import Migration0068 from "./Migrations/068_WebhookDedupe.ts";
+import Migration0069 from "./Migrations/069_ShellStopRequestIndex.ts";
+import Migration0070 from "./Migrations/070_ThreadMessageSearch.ts";
+import Migration0071 from "./Migrations/071_PeerLinks.ts";
+import Migration0072 from "./Migrations/072_PeerLinkFence.ts";
+import Migration0073 from "./Migrations/073_WaitingLinkRequestIndex.ts";
+import Migration0074 from "./Migrations/074_ActiveTurnItemIndexes.ts";
+import Migration0075 from "./Migrations/075_ExcludeAttachmentPlaceholdersFromSearch.ts";
+import Migration0076 from "./Migrations/076_SubagentDeliveryState.ts";
+import Migration0077 from "./Migrations/077_ProjectionProjectsPinArchive.ts";
+import Migration0078 from "./Migrations/078_RepairBooleanSettledOverride.ts";
 
-export const migrationEntries = [
+const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
   [2, "OrchestrationCommandReceipts", Migration0002],
   [3, "CheckpointDiffBlobs", Migration0003],
@@ -132,6 +147,21 @@ export const migrationEntries = [
   [61, "ThreadSnapshotWindowIndexes", Migration0061],
   [62, "PullRequestReviewGuides", Migration0062],
   [63, "ThreadFailureLookupIndex", Migration0063],
+  [64, "DropUnusedV1Projections", Migration0064],
+  [65, "CanonicalizeThreadPullRequestLinks", Migration0065],
+  [66, "CodexUsageNativeTurnIndex", Migration0066],
+  [67, "RepairClientSettlementTimestamps", Migration0067],
+  [68, "WebhookDedupe", Migration0068],
+  [69, "ShellStopRequestIndex", Migration0069],
+  [70, "ThreadMessageSearch", Migration0070],
+  [71, "PeerLinks", Migration0071],
+  [72, "PeerLinkFence", Migration0072],
+  [73, "WaitingLinkRequestIndex", Migration0073],
+  [74, "ActiveTurnItemIndexes", Migration0074],
+  [75, "ExcludeAttachmentPlaceholdersFromSearch", Migration0075],
+  [76, "SubagentDeliveryState", Migration0076],
+  [77, "ProjectionProjectsPinArchive", Migration0077],
+  [78, "RepairBooleanSettledOverride", Migration0078],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
@@ -147,12 +177,7 @@ const makeMigrationLoader = (throughId?: number) =>
 
 const FIRST_V2_MIGRATION_ID = 55;
 
-/**
- * Fail before migrating when the migrator would skip one of V2's own
- * migrations. It skips every id up to the highest recorded one, whatever name
- * was recorded, so a database that took a V2 id for another migration would
- * start without V2's schema and fail on first use.
- */
+// Migrators skip ids up to the highest recorded; reject collisions that would skip V2 schema.
 const assertV2MigrationsCanRun = Effect.fn("assertV2MigrationsCanRun")(function* (
   throughId?: number,
 ) {

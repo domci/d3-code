@@ -11,6 +11,14 @@ export interface AppBarAction {
   readonly loading?: boolean;
   readonly selected?: boolean;
   readonly tintColor?: ColorValue;
+  /** Android: list in the overflow menu only. */
+  readonly overflowOnly?: boolean;
+  readonly destructive?: boolean;
+  readonly subactions?: ReadonlyArray<{
+    readonly title: string;
+    readonly subtitle?: string;
+    readonly onPress: () => void;
+  }>;
 }
 
 export type AppBarMenuItem =
@@ -68,6 +76,8 @@ export interface AppBarProps {
     readonly onPress?: () => void;
   };
   readonly hideBottomBorder?: boolean;
+  /** Android: one title row with the subtitle inline. iOS ignores it. */
+  readonly compact?: boolean;
   readonly trailing?: ReactNode;
   readonly matchSearchSurface?: boolean;
   readonly options?: AppNativeStackNavigationOptions;

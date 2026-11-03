@@ -1,6 +1,6 @@
 import { useDroppable } from "@dnd-kit/core";
 import { ChevronRightIcon, FolderIcon, MoreHorizontalIcon } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useState } from "react";
 import { create } from "zustand";
 import {
   AuthOrchestrationOperateScope,
@@ -85,49 +85,38 @@ export function useProjectThreadFolders(projects: readonly Project[]) {
   );
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
-  const { folders, folderByThreadKey } = useMemo(
-    () => buildSidebarThreadFolders(projects),
-    [projects],
-  );
-  const run = useCallback(
-    async (project: Project, operation: ProjectThreadFolderOperation) => {
-      const result = await update({
-        environmentId: project.environmentId,
-        input: { projectId: project.id, threadFolderOperation: operation },
+  const { folders, folderByThreadKey } = buildSidebarThreadFolders(projects);
+  const run = async (project: Project, operation: ProjectThreadFolderOperation) => {
+    const result = await update({
+      environmentId: project.environmentId,
+      input: { projectId: project.id, threadFolderOperation: operation },
+    });
+    if (result._tag === "Success") return true;
+    if (!isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
+      toastManager.add({
+        type: "error",
+        title: "Could not update folder",
+        description: error instanceof Error ? error.message : "Please try again.",
       });
-      if (result._tag === "Success") return true;
-      if (!isAtomCommandInterrupted(result)) {
-        const error = squashAtomCommandFailure(result);
-        toastManager.add({
-          type: "error",
-          title: "Could not update folder",
-          description: error instanceof Error ? error.message : "Please try again.",
-        });
-      }
-      return false;
-    },
-    [update],
-  );
-  const edit = useCallback((project: Project, folder?: ProjectThreadFolder) => {
+    }
+    return false;
+  };
+  const edit = (project: Project, folder?: ProjectThreadFolder) => {
     setName(folder?.name ?? "");
     setEditor({ project, ...(folder ? { folder } : {}) });
-  }, []);
+  };
   const save = async () => {
     if (!editor || saving || !name.trim()) return;
     setSaving(true);
-    try {
-      if (
-        await run(
-          editor.project,
-          editor.folder
-            ? { type: "rename", id: editor.folder.id, name: name.trim() }
-            : { type: "create", id: randomUUID(), name: name.trim() },
-        )
-      )
-        setEditor(null);
-    } finally {
-      setSaving(false);
-    }
+    // React Compiler cannot compile try/finally yet, so cleanup rides on the promise.
+    const saved = await run(
+      editor.project,
+      editor.folder
+        ? { type: "rename", id: editor.folder.id, name: name.trim() }
+        : { type: "create", id: randomUUID(), name: name.trim() },
+    ).finally(() => setSaving(false));
+    if (saved) setEditor(null);
   };
   return {
     folders,

@@ -3,12 +3,9 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
 /**
- * The real location of `target`, whether or not it exists yet: the deepest
- * existing ancestor is resolved through symlinks and the rest is appended.
- * Paths stored before the data folder moved from `~/.t3` to `~/.d3` still go
- * through the `~/.t3` symlink, so any comparison, containment check, or map
- * key over such paths must use this form, never the stored string. Operations
- * on the location (git, fs) keep using the stored form.
+ * The real location of `target`, existing or not (deepest existing ancestor resolved, rest appended).
+ * Paths stored before `~/.t3` became `~/.d3` go through a symlink, so comparisons, containment checks
+ * and map keys must use this form; git and fs operations keep the stored form.
  */
 export function canonicalPath(target: string): string {
   const resolved = NodePath.resolve(target);

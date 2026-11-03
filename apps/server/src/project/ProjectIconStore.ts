@@ -1,10 +1,7 @@
 /**
- * Project icons uploaded from a client. The bytes arrive through the regular
- * attachment upload transport as a pending attachment. Saving the project with
- * `faviconPath: "attachment:<pending id>"` claims it: the file is validated and
- * moved into `<attachmentsDir>/project-icons/`, outside every repo checkout,
- * and the project then references the managed file by absolute path.
- *
+ * Client-uploaded project icons arrive as pending attachments. Saving the project with
+ * `faviconPath: "attachment:<pending id>"` validates and moves the file into
+ * `<attachmentsDir>/project-icons/`, outside every repo checkout, referenced by absolute path.
  * @module ProjectIconStore
  */
 import { canonicalPath } from "../canonicalPath.ts";
@@ -21,7 +18,7 @@ import {
 } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 
-export const PROJECT_ICON_REFERENCE_PREFIX = "attachment:";
+const PROJECT_ICON_REFERENCE_PREFIX = "attachment:";
 export const PROJECT_ICON_MAX_BYTES = 1024 * 1024;
 const PROJECT_ICONS_DIRECTORY = "project-icons";
 
