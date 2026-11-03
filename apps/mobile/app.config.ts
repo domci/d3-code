@@ -9,7 +9,6 @@ const repoEnv = loadRepoEnv();
 Object.assign(process.env, repoEnv);
 
 const APP_VARIANT = resolveAppVariant(repoEnv.APP_VARIANT);
-const MICROPHONE_PERMISSION = "Allow D3 Code to use your microphone for voice input.";
 const isIosPersonalTeamBuild = repoEnv.T3CODE_IOS_PERSONAL_TEAM === "1";
 const runtimeVersionPolicy =
   process.env.MOBILE_VERSION_POLICY ??
@@ -357,8 +356,8 @@ const config: ExpoConfig = {
     [
       "expo-audio",
       {
-        microphonePermission: MICROPHONE_PERMISSION,
-        recordAudioAndroid: true,
+        microphonePermission: "Allow D3 Code to use your microphone for voice input.",
+        recordAudioAndroid: false,
         enableBackgroundPlayback: false,
         enableBackgroundRecording: false,
       },
@@ -372,11 +371,7 @@ const config: ExpoConfig = {
         recordAudioAndroid: false,
       },
     ],
-    [
-      "expo-image-picker",
-      // A false microphone permission would block RECORD_AUDIO on Android, which voice input needs.
-      { photosPermission: false, microphonePermission: MICROPHONE_PERMISSION },
-    ],
+    ["expo-image-picker", { photosPermission: false, microphonePermission: false }],
     [
       "expo-splash-screen",
       {
@@ -423,7 +418,6 @@ const config: ExpoConfig = {
     // Mods run in reverse order; expo-widgets must create and wipe the target before assets are added.
     ...(!isIosPersonalTeamBuild ? ["./plugins/withWidgetLogoAsset.cjs", widgetsPlugin] : []),
     "./plugins/withAndroidNetworkSecurityConfig.cjs",
-    "./plugins/withAndroidMlKitSpeechMinSdk.cjs",
     "./plugins/withAndroidGradleHeap.cjs",
     "./plugins/withAndroidInputBackground.cjs",
     "./plugins/withAndroidModernPopupMenu.cjs",
