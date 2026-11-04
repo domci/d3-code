@@ -231,6 +231,7 @@ minimumReleaseAgeExclude:
 overrides:
   # Keep security fixes on the current release lines where possible. Validate
   # dbus-next XML parsing, Xcode UUID generation, and Markdown math on upgrades.
+  "node-forge@>=1.0.0 <1.4.2": 1.4.2
   "dbus-next>xml2js": 0.6.2
   "xcode>uuid": 11.1.1
   "valibot@>=1.0.0 <1.4.2": 1.4.2
