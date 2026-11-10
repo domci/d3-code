@@ -70,10 +70,9 @@ export function deriveLatestContextWindowSnapshot(
       candidate.id === projection.thread.activeProviderThreadId &&
       candidate.providerInstanceId === projection.thread.providerInstanceId,
   );
-  if (providerThread === undefined) return null;
   const attempts = new Map(projection.attempts.map((attempt) => [attempt.id, attempt]));
   const turns = new Map(projection.providerTurns.map((turn) => [turn.id, turn]));
-  const nativeThreadId = providerThread.nativeThreadRef?.nativeId;
+  const nativeThreadId = providerThread?.nativeThreadRef?.nativeId;
   // Recovery may reuse the row for a different native conversation; legacy identities are optional.
   const belongsToNativeThread = (turn: ThreadStructure["providerTurns"][number] | undefined) => {
     const attempt = turn?.runAttemptId == null ? undefined : attempts.get(turn.runAttemptId);
@@ -86,7 +85,7 @@ export function deriveLatestContextWindowSnapshot(
   const liveUsage =
     projection.providerTurns.reduce<ThreadStructure["providerTurns"][number] | null>(
       (latest, candidate) =>
-        candidate.providerThreadId === providerThread.id &&
+        candidate.providerThreadId === providerThread?.id &&
         belongsToNativeThread(candidate) &&
         candidate.tokenUsage !== undefined &&
         (latest === null || candidate.ordinal > latest.ordinal)
@@ -101,7 +100,7 @@ export function deriveLatestContextWindowSnapshot(
     ({ item }) =>
       item.type === "compaction" &&
       item.status === "completed" &&
-      item.providerThreadId === providerThread.id &&
+      item.providerThreadId === providerThread?.id &&
       item.threadId === projection.thread.id &&
       belongsToNativeThread(
         item.providerTurnId === null ? undefined : turns.get(item.providerTurnId),
@@ -112,7 +111,9 @@ export function deriveLatestContextWindowSnapshot(
   )?.item;
   const usageUpdatedAt =
     liveUsage === undefined
-      ? DateTime.toEpochMillis(providerThread.updatedAt)
+      ? providerThread === undefined
+        ? 0
+        : DateTime.toEpochMillis(providerThread.updatedAt)
       : Date.parse(liveUsage.updatedAt);
   const newerCompaction =
     compaction?.type === "compaction" &&
@@ -144,7 +145,7 @@ export function deriveLatestContextWindowSnapshot(
       lastReasoningOutputTokens: null,
       toolUses: null,
       durationMs: null,
-      compactsAutomatically: providerThread.contextUsage?.compactsAutomatically ?? null,
+      compactsAutomatically: providerThread?.contextUsage?.compactsAutomatically ?? null,
       autoCompactThreshold: liveUsage.autoCompactThreshold ?? null,
       cost: null,
       updatedAt: liveUsage.updatedAt,
@@ -212,7 +213,7 @@ export function deriveLatestContextWindowSnapshot(
       lastReasoningOutputTokens: null,
       toolUses: null,
       durationMs: null,
-      compactsAutomatically: providerThread.contextUsage?.compactsAutomatically ?? null,
+      compactsAutomatically: providerThread?.contextUsage?.compactsAutomatically ?? null,
       autoCompactThreshold: null,
       cost: null,
       updatedAt: DateTime.formatIso(payload.updatedAt),

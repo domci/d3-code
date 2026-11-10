@@ -149,7 +149,6 @@ function EnvironmentSetup({
               model={active.model}
               modelOptions={active.options ?? []}
               allowPromptInjectedEffort={false}
-              planModeEnabled={settings.planModeEnabled}
               onModelOptionsChange={(options) =>
                 setSelection(createModelSelection(active.instanceId, active.model, options))
               }

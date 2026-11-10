@@ -42,6 +42,7 @@ const layerElectronApp = (calls: ElectronAppCalls) =>
     metadata: Effect.die("unexpected metadata read"),
     name: Effect.succeed("D3 Code"),
     systemLocale: Effect.succeed("en-US"),
+    preferredSystemLanguages: Effect.succeed(["en-US"]),
     whenReady: Effect.void,
     requestSingleInstanceLock: Effect.succeed(true),
     quit: Effect.void,
@@ -132,7 +133,7 @@ const withIdentity = <A, E, R>(
               input.legacyPathProbeError
                 ? Effect.fail(input.legacyPathProbeError)
                 : Effect.succeed(
-                    input.legacyPathExists === true && /T3 Code \((Alpha|Dev)\)/.test(path),
+                    input.legacyPathExists === true && /D3 Code \((Alpha|Dev)\)/.test(path),
                   ),
             readFileString: () =>
               Effect.succeed(input.packageJson ?? '{"t3codeCommitHash":"abcdef1234567890"}'),
@@ -165,7 +166,7 @@ describe("DesktopAppIdentity", () => {
         const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
         assert.equal(
           yield* identity.resolveUserDataPath,
-          "/Users/alice/Library/Application Support/T3 Code (Dev)",
+          "/Users/alice/Library/Application Support/D3 Code (Dev)",
         );
       }),
       {

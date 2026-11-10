@@ -5,7 +5,7 @@
  * @module ProjectIconStore
  */
 import { canonicalPath } from "../canonicalPath.ts";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -61,7 +61,7 @@ export const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const crypto = yield* Crypto.Crypto;
+  const random = yield* SecureRandom.SecureRandom;
   const iconsDir = path.join(config.attachmentsDir, PROJECT_ICONS_DIRECTORY);
 
   /** Validates a pending upload and moves it into the managed icons directory. */
@@ -83,7 +83,7 @@ export const make = Effect.gen(function* () {
     const extension = sniffProjectIconExtension(bytes);
     if (!extension) return yield* new ProjectIconInvalidError({ reason: "unsupported-type" });
 
-    const id = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
+    const id = yield* random.uuidV4();
     const finalPath = path.join(iconsDir, `${id}${extension}`);
     yield* fileSystem
       .makeDirectory(iconsDir, { recursive: true })

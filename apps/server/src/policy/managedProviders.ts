@@ -19,6 +19,7 @@ import { acpRegistryClient } from "@t3tools/provider-acp-registry/client";
 import { cursorClient } from "@t3tools/provider-cursor/client";
 import { fxClient } from "@t3tools/provider-fx/client";
 import { grokClient } from "@t3tools/provider-grok/client";
+import { kiroClient } from "@t3tools/provider-kiro/client";
 import { museClient } from "@t3tools/provider-muse/client";
 import { openCodeClient } from "@t3tools/provider-opencode/client";
 import { piClient } from "@t3tools/provider-pi/client";
@@ -45,6 +46,7 @@ const PACKAGED_CLIENTS: ReadonlyArray<ProviderClientDefinition> = [
   cursorClient,
   grokClient,
   fxClient,
+  kiroClient,
   museClient,
   openCodeClient,
   piClient,
@@ -75,13 +77,17 @@ const KNOWN_DRIVERS: ReadonlyMap<ProviderDriverKind, KnownDriver> = new Map([
   ),
 ]);
 
+/** Each driver a policy may name, with the label users see. */
+export const knownDriverLabels = () =>
+  Array.from(KNOWN_DRIVERS, ([driver, { label }]) => ({ driver, label }));
+
 const PINNED_CONFIG_FIELDS = ["binaryPath", "launchArgs"] as const;
 type PinnedConfigField = (typeof PINNED_CONFIG_FIELDS)[number];
 
 /**
  * Fields that decide what a provider starts and reads on startup; a driver has those its schema
  * has. Under a ceiling they are the administrator's: a wrapper binary, a skip-permissions flag, or
- * a config directory with allow rules each outrank T3 Code's mode, and no flag filter stops a wrapper.
+ * a config directory with allow rules each outrank D3 Code's mode, and no flag filter stops a wrapper.
  */
 const LAUNCH_CONFIG_FIELDS = [
   "binaryPath",
@@ -200,7 +206,8 @@ const sameVariable = (
   left === right ||
   (left !== undefined &&
     right !== undefined &&
-    left.value === right.value &&
+    // A secret reference is an object, and a decoded copy is never the stored one.
+    sameValue(left.value, right.value) &&
     left.sensitive === right.sensitive);
 
 const pinnedFields = (pin: ManagedProviderInstance): ReadonlyArray<PinnedConfigField> =>
@@ -382,6 +389,8 @@ export function makeManagedProviders(
     const result: ServerSettings = {
       ...settings,
       providerInstances: providerInstances as ServerSettings["providerInstances"],
+      // An allow-list names agent drivers; text generators would send code to any other API.
+      ...(allowed === undefined ? {} : { textGenerators: {} }),
       sourceControlWriterModelSelection: allowedSelection(
         settings,
         settings.sourceControlWriterModelSelection,

@@ -31,7 +31,7 @@ import { ListChoiceRow } from "../../components/ui/ListChoiceRow";
 import { ListSection } from "../../components/ui/ListSection";
 import { Sheet } from "../../components/ui/Sheet";
 import { makeTurnCommandMetadata } from "../../lib/commandMetadata";
-import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
+import { useSelectWorkspaceDetail } from "../layout/workspace/useSelectWorkspaceDetail";
 import {
   buildModelOptions,
   groupByProvider,
@@ -51,7 +51,7 @@ import {
   waitForComposerDraftsLoaded,
 } from "../../state/use-composer-drafts";
 import { vcsEnvironment } from "../../state/vcs";
-import { ListFilterMenu } from "../workspace/ListFilterMenu";
+import { ListFilterMenu } from "../layout/workspace/ListFilterMenu";
 
 // Upstream dropped these with its last other caller; the board model picker still needs them.
 function modelMenuAction(option: ModelOption, selectedModel: ModelSelection | null): MenuAction {

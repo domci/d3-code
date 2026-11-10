@@ -168,7 +168,7 @@ describe("provider compatibility", () => {
     }
   });
 
-  it("applies policies only within their T3 Code version range", () => {
+  it("applies policies only within their D3 Code version range", () => {
     const scopedPolicy = { ...policy, t3CodeRange: ">=0.0.42 <0.1.0" };
     for (const version of ["0.0.42", "0.0.45"]) {
       assert.strictEqual(
@@ -285,6 +285,7 @@ it.effect("a remote policy refresh preserves a newer health result on the regist
         current: Ref.get(manifest),
         refresh,
         forceRefresh: refresh,
+        refreshOnDemand: refresh,
         refreshInBackground: Effect.void,
       }),
       Layer.succeed(ProviderInstanceRegistry.ProviderInstanceRegistry, {

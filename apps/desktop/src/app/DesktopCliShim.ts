@@ -2,6 +2,7 @@ import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
+import * as Random from "effect/Random";
 
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import { makeComponentLogger } from "./DesktopObservability.ts";
@@ -9,7 +10,7 @@ import { makeComponentLogger } from "./DesktopObservability.ts";
 // AppImage mounts change each run; the launcher must mount the image itself.
 const { logInfo, logWarning } = makeComponentLogger("desktop-cli-shim");
 
-export const MARKER = "Written by T3 Code: runs the desktop app's bundled t3 CLI.";
+export const MARKER = "Written by D3 Code: runs the desktop app's bundled t3 CLI.";
 
 const SERVER_ENTRY = "apps/server/dist/bin.mjs";
 
@@ -18,7 +19,7 @@ const shellWord = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`;
 const cmdText = (value: string) => value.replaceAll("%", "%%");
 const cmdWord = (value: string) => `"${cmdText(value)}"`;
 
-const MOVED = "T3 Code has moved or been removed. Open the app once to update this command.";
+const MOVED = "D3 Code has moved or been removed. Open the app once to update this command.";
 
 export type CliShimTarget =
   | { readonly kind: "appimage"; readonly appImage: string; readonly executableName: string }
@@ -147,7 +148,8 @@ export const install = Effect.gen(function* () {
     }
     if (Option.getOrUndefined(existing) !== content) {
       yield* fs.makeDirectory(path.dirname(shimPath), { recursive: true });
-      const staging = `${shimPath}.${process.pid}.tmp`;
+      // Unique per call: backend startup and the first-launch command install can race here.
+      const staging = `${shimPath}.${process.pid}.${yield* Random.nextIntBetween(0, 0xffffff)}.tmp`;
       yield* fs.writeFileString(staging, content, { mode: 0o755 });
       yield* fs.rename(staging, shimPath);
       yield* logInfo("installed t3 launcher", { shimPath });

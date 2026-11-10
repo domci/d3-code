@@ -77,13 +77,6 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
             showCopyButton={row.showAssistantCopyButton}
             copyStreaming={row.assistantCopyStreaming}
           />
-        ) : row.showAssistantTimestamp ? (
-          <AssistantMessageMeta
-            className="mt-1.5"
-            message={row.message}
-            showCopyButton={false}
-            copyStreaming={row.assistantCopyStreaming}
-          />
         ) : null}
         {row.interimAssistant && !row.showAssistantMeta && row.projectedItem ? (
           // Mid-turn messages carry no meta row; give them the fork control only.

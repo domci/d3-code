@@ -63,8 +63,8 @@ const CLAUDE_HOST_SESSION_VARIABLES = [
 ];
 
 /**
- * Base env for the Claude processes T3 Code runs, before `makeClaudeEnvironment`.
- * Claude Code reads its entrypoint from the process env, not its settings `env`, so T3 Code applies that override itself.
+ * Base env for the Claude processes D3 Code runs, before `makeClaudeEnvironment`.
+ * Claude Code reads its entrypoint from the process env, not its settings `env`, so D3 Code applies that override itself.
  */
 export const mergeClaudeProcessEnvironment = Effect.fn("mergeClaudeProcessEnvironment")(function* (
   config: Pick<ClaudeSettings, "homePath">,
@@ -76,6 +76,9 @@ export const mergeClaudeProcessEnvironment = Effect.fn("mergeClaudeProcessEnviro
     CLAUDE_CODE_ENTRYPOINT: "t3-code",
   };
   for (const name of CLAUDE_HOST_SESSION_VARIABLES) delete baseEnvironment[name];
+  // The desktop runs the server as Node through Electron. Commands Claude runs inherit its env, so
+  // an Electron app they start (D3 Code itself, VS Code) would run as Node and exit.
+  delete baseEnvironment.ELECTRON_RUN_AS_NODE;
   const environment = yield* mergeProviderInstanceEnvironment(instanceEnvironment, baseEnvironment);
   const settingsEntrypoint = (yield* readClaudeSettingsEnv(config, undefined, environment))
     .CLAUDE_CODE_ENTRYPOINT;

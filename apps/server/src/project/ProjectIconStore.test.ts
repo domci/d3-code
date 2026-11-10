@@ -2,6 +2,7 @@
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -12,7 +13,7 @@ import * as ServerConfig from "../config.ts";
 import { make, PROJECT_ICON_MAX_BYTES, sniffProjectIconExtension } from "./ProjectIconStore.ts";
 
 const layerTest = ServerConfig.layerTest(process.cwd(), { prefix: "t3-project-icon-" }).pipe(
-  Layer.provideMerge(NodeServices.layer),
+  Layer.provideMerge(Layer.merge(NodeServices.layer, NodeCrypto.layer)),
 );
 
 const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]);

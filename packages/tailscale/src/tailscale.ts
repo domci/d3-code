@@ -11,7 +11,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 export const DEFAULT_TAILSCALE_SERVE_PORT = 443;
 /**
  * Bounds `tailscale status` and `tailscale debug prefs`. Allows the 1.8-2.6 s
- * `tailscale status` has been measured at when T3 Code spawns it on Windows.
+ * `tailscale status` has been measured at when D3 Code spawns it on Windows.
  * A CLI that never answers takes longer than this to fail, because the kill
  * that follows the timeout also takes time (`taskkill` on Windows).
  */
@@ -397,12 +397,14 @@ const runTailscaleCommand = Effect.fn("tailscale.runTailscaleCommand")(function*
   };
   const timeout = Duration.fromInputUnsafe(timeoutInput);
   return yield* Effect.gen(function* () {
-    const child = yield* spawner.spawn(ChildProcess.make(executable, args)).pipe(
-      Effect.mapError((cause) => new TailscaleCommandSpawnError({ ...commandContext, cause })),
-      Effect.catchDefect((cause) =>
-        Effect.fail(new TailscaleCommandSpawnError({ ...commandContext, cause })),
-      ),
-    );
+    const child = yield* spawner
+      .spawn(ChildProcess.make(executable, args, { forceKillAfter: TAILSCALE_KILL_GRACE }))
+      .pipe(
+        Effect.mapError((cause) => new TailscaleCommandSpawnError({ ...commandContext, cause })),
+        Effect.catchDefect((cause) =>
+          Effect.fail(new TailscaleCommandSpawnError({ ...commandContext, cause })),
+        ),
+      );
     const [stderr, exitCode] = yield* Effect.all(
       [collectStderr(child.stderr), child.exitCode.pipe(Effect.map(Number))],
       { concurrency: "unbounded" },

@@ -17,6 +17,7 @@ import type {
   PullRequestDetail,
   PullRequestMergeMethod,
   PullRequestRef,
+  PullRequestSummary,
   ScopedThreadRef,
 } from "@t3tools/contracts";
 import { useRef, useState } from "react";
@@ -46,6 +47,7 @@ import { toastManager } from "../ui/toast";
 import { offHeadPullRequestCheckoutToast } from "./pullRequestCheckoutToast";
 import {
   checkoutFailureDescription,
+  appendHandoff,
   handoffPrompt,
   handoffReviewComments,
   readableFailure,
@@ -141,7 +143,7 @@ export function usePullRequestActionRunner({
   environmentId: EnvironmentId;
   reference: PullRequestRef | null;
   terminology: ChangeRequestTerminology;
-  onSuccess?: (action: PullRequestAction) => void;
+  onSuccess?: (action: PullRequestAction, reply: PullRequestSummary | undefined) => void;
   /** Resolve repository settings on click to avoid per-row reads. */
   resolveMergeMethod?: (detail: PullRequestDetail) => PullRequestMergeMethod;
 }) {
@@ -187,13 +189,15 @@ export function usePullRequestActionRunner({
       return;
     }
     toastManager.add({ type: "success", title: actionSuccessLabels(terminology.singular)[action] });
-    onSuccess?.(action);
+    onSuccess?.(action, result.value);
   };
 
   return { actionPending, perform };
 }
 
-export function usePullRequestCloseBatch(onClosed: (entry: EnvironmentPullRequestEntry) => void) {
+export function usePullRequestCloseBatch(
+  onClosed: (entry: EnvironmentPullRequestEntry, reply: PullRequestSummary | undefined) => void,
+) {
   const runAction = useAtomCommand(pullRequestEnvironment.runAction, { reportFailure: false });
   const pending = useRef(new Set<string>());
   const [closingKeys, setClosingKeys] = useState<ReadonlySet<string>>(() => new Set());
@@ -227,7 +231,7 @@ export function usePullRequestCloseBatch(onClosed: (entry: EnvironmentPullReques
           );
           return;
         }
-        onClosed(entry);
+        onClosed(entry, result.value);
         return true;
       }),
     );
@@ -247,6 +251,20 @@ export function usePullRequestCloseBatch(onClosed: (entry: EnvironmentPullReques
 export interface PullRequestThreadTask {
   prompt: string;
   reviewComments?: ReadonlyArray<ReviewCommentContext>;
+}
+
+export function writeHandoffToComposer(
+  target: ScopedThreadRef | DraftId,
+  task: PullRequestThreadTask,
+) {
+  const store = useComposerDraftStore.getState();
+  const draft = store.getComposerDraft(target);
+  const next = appendHandoff(
+    { prompt: draft?.prompt ?? "", reviewComments: draft?.reviewComments ?? [] },
+    task,
+  );
+  store.setPrompt(target, next.prompt);
+  store.setReviewComments(target, next.reviewComments);
 }
 
 export type PullRequestHandoffDetail = Pick<

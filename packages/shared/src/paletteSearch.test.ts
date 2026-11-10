@@ -40,6 +40,43 @@ describe("scoreThreadSearch", () => {
         thread("Share auth across worktrees"),
       ]),
     ).toEqual(["Share auth across worktrees", "Authentication cleanup", "Fix oauth redirect"]);
+    expect(
+      rankTitles("share auth", [
+        thread("Share authentication cleanup", {
+          activityAt: NOW,
+          opens: { openedAt: NOW, score: 12, picks: [] },
+        }),
+        thread("Auth across worktrees to share", { activityAt: NOW - 90 * DAY }),
+      ]),
+    ).toEqual(["Auth across worktrees to share", "Share authentication cleanup"]);
+    expect(
+      rankTitles("ui", [
+        thread("Parse ui tokens", { activityAt: NOW - 200 * DAY }),
+        thread("Polish UIs", { activityAt: NOW, opens: { openedAt: NOW, score: 12, picks: [] } }),
+      ]),
+    ).toEqual(["Polish UIs", "Parse ui tokens"]);
+    expect(
+      rankTitles("fix in sidebar", [
+        thread("Fix sidebar", { activityAt: NOW - 200 * DAY }),
+        thread("Fix crash in sidebar", {
+          activityAt: NOW,
+          opens: { openedAt: NOW, score: 12, picks: [] },
+        }),
+        thread("Fix sidebar input focus", {
+          activityAt: NOW,
+          opens: { openedAt: NOW, score: 6, picks: [] },
+        }),
+      ]),
+    ).toEqual(["Fix crash in sidebar", "Fix sidebar input focus", "Fix sidebar"]);
+    expect(
+      rankTitles("and", [
+        thread("Fix auth and sync", { activityAt: NOW - 200 * DAY }),
+        thread("Android build", {
+          activityAt: NOW,
+          opens: { openedAt: NOW, score: 12, picks: [] },
+        }),
+      ]),
+    ).toEqual(["Android build", "Fix auth and sync"]);
   });
 
   it("treats camelCase, kebab, path, and digit boundaries as word starts", () => {
@@ -176,15 +213,15 @@ describe("scoreThreadSearch", () => {
           branch: "t3/diagnose-connect",
           projectTitle: "t3code",
         }),
-        thread("T3 Connect Tunnel Lifecycle Review", { projectTitle: "t3code" }),
+        thread("D3 Connect Tunnel Lifecycle Review", { projectTitle: "t3code" }),
       ])[0],
-    ).toBe("T3 Connect Tunnel Lifecycle Review");
+    ).toBe("D3 Connect Tunnel Lifecycle Review");
     expect(
       rankTitles("t3code", [
         thread("Fix sidebar lag", { ...busy, projectTitle: "t3code", branch: "t3code/sidebar" }),
-        thread("T3 Code vs Gemini Token Volume", { projectTitle: "slophouse" }),
+        thread("D3 Code vs Gemini Token Volume", { projectTitle: "slophouse" }),
       ])[0],
-    ).toBe("T3 Code vs Gemini Token Volume");
+    ).toBe("D3 Code vs Gemini Token Volume");
   });
 
   it("matches pull request numbers, branches, and projects with every token somewhere", () => {
@@ -323,7 +360,7 @@ describe("scoreThreadSearch beyond Latin text and titles", () => {
     // Short words before a mere prefix are a coincidence.
     expect(rankTitles("inth", [thread("Show skill names in thread overview")])).toEqual([]);
     expect(rankTitles("tos", [thread("Move Client State to Server")])).toEqual([]);
-    expect(rankTitles("t3co", [thread("T3 Code vs Gemini")])).toEqual(["T3 Code vs Gemini"]);
+    expect(rankTitles("t3co", [thread("D3 Code vs Gemini")])).toEqual(["D3 Code vs Gemini"]);
     expect(rankTitles('"sidebar lag"', [thread("Fix sidebar lag")])).toEqual(["Fix sidebar lag"]);
     // A pasted query with a separate accent mark matches the composed title.
     expect(rankTitles("cafe\u0301", [thread("Café menu")])).toEqual(["Café menu"]);
@@ -661,6 +698,26 @@ describe("scoreMessageMatch", () => {
     expect(scoreMessageMatch("We trust the build", "rust")).toEqual({ quality: 0.3, offset: 4 });
     expect(scoreMessageMatch("Rust and trust", "rust")).toEqual({ quality: 1, offset: 0 });
     expect(scoreMessageMatch("Use the sidebar", '"sidebar"')).toEqual({ quality: 1, offset: 8 });
+    for (const [text, query, expected] of [
+      ["model mode mode", "mode", { quality: 1, offset: 6 }],
+      ["xmode model models", "mode", { quality: 0.8, offset: 6 }],
+      ["model models", "mode", { quality: 0.8, offset: 0 }],
+      ["xmode ymode", "mode", { quality: 0.3, offset: 1 }],
+      ["mode mode", "mode", { quality: 1, offset: 0 }],
+      ["fts fts", "fts", { quality: 1, offset: 0 }],
+      ["the theme", "he", null],
+      ["he theme", "he", { quality: 1, offset: 0 }],
+      ["notes", "", { quality: 1, offset: 0 }],
+      ["", "notes", null],
+      ["same same same", "same same", { quality: 1.25, offset: 0 }],
+      ["7cafe52bb8 cafe cafe", "cafe", { quality: 1, offset: 11 }],
+      ["7cafe52bb8 7cafe52bb8", "7cafe52", { quality: 1, offset: 0 }],
+      ["明天部署部署到生产环境", "部署", { quality: 1, offset: 2 }],
+      ["gannet’s gannet's", "gannet's", { quality: 1, offset: 9 }],
+      ["gannet's gannet’s", "gannet’s", { quality: 1, offset: 0 }],
+    ] as const) {
+      expect(scoreMessageMatch(text, query), `${query} in ${text}`).toEqual(expected);
+    }
     // Words written together as typed rank above the same words apart, and
     // the snippet starts where they are together.
     const together = "Run the tests, then vp run dev to check";
@@ -736,5 +793,14 @@ describe("scoreMessageMatch", () => {
     expect(scoreMessageMatch("İ Enable fts and model", "fts")).toMatchObject({ offset: 9 });
     expect(scoreMessageMatch("İ Enable fts and model", "model")?.quality).toBe(1);
     expect(scoreMessageMatch("Trip to İstanbul", "İstanbul")).toEqual({ quality: 1, offset: 8 });
+    for (const [text, query, expected] of [
+      ["İ cafeteria Café CAFÉ", "cafe", { quality: 1, offset: 12 }],
+      ["Café cafe", "cafe", { quality: 1, offset: 5 }],
+      ["İ Café Café", "café", { quality: 1, offset: 2 }],
+      ["İ Résumé Résumé", "resume", { quality: 1, offset: 2 }],
+      ["İ résuméprefix résumé", "resume", { quality: 1, offset: 15 }],
+    ] as const) {
+      expect(scoreMessageMatch(text, query), `${query} in ${text}`).toEqual(expected);
+    }
   });
 });

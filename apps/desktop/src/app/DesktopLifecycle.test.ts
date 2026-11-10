@@ -39,6 +39,7 @@ function layerElectronApp(
     metadata: Effect.die("unexpected metadata read"),
     name: Effect.succeed("D3 Code"),
     systemLocale: Effect.succeed("en-US"),
+    preferredSystemLanguages: Effect.succeed(["en-US"]),
     whenReady: Effect.void,
     requestSingleInstanceLock: Effect.succeed(true),
     quit,
@@ -257,16 +258,16 @@ describe("DesktopLifecycle", () => {
         return yield* Deferred.await(relaunched);
       }).pipe(
         Effect.provide(layer),
-        Effect.provideService(HostProcess.ExecutablePath, "/opt/T3 Code/t3code"),
+        Effect.provideService(HostProcess.ExecutablePath, "/opt/D3 Code/t3code"),
         Effect.provideService(HostProcess.Arguments, [
-          "/opt/T3 Code/t3code",
+          "/opt/D3 Code/t3code",
           "--no-sandbox",
           "T3CODE://pair?token=spent",
           "t3code://new?prompt=hello",
         ]),
       );
 
-      assert.deepEqual(options, { execPath: "/opt/T3 Code/t3code", args: ["--no-sandbox"] });
+      assert.deepEqual(options, { execPath: "/opt/D3 Code/t3code", args: ["--no-sandbox"] });
     }),
   );
 

@@ -37,9 +37,9 @@ type Routes = Readonly<Record<Route, boolean>>;
 /** How other devices reach this machine now. */
 interface Setup {
   readonly service: BootService.BootServiceStatus;
-  /** Null in builds without T3 Connect. Off when T3 Connect revoked the link. */
+  /** Null in builds without D3 Connect. Off when D3 Connect revoked the link. */
   readonly connect: boolean | null;
-  /** T3 Connect revoked the link; `t3 connect` links again. */
+  /** D3 Connect revoked the link; `t3 connect` links again. */
   readonly connectRevoked: boolean;
   readonly lan: boolean;
   /** An installed service with no T3CODE_LAN keeps the old default: on. */
@@ -48,7 +48,7 @@ interface Setup {
 }
 
 /**
- * T3 Connect is on when this CLI asked for a managed link, or when the desktop or
+ * D3 Connect is on when this CLI asked for a managed link, or when the desktop or
  * web app made one: that saves the tunnel config but no CLI marker. Revoked is off.
  */
 export const connectEnabled = (link: {
@@ -79,19 +79,21 @@ const readSetup = Effect.fn("cli.up.read_setup")(function* () {
         revoked: connectRevoked,
       })
     : null;
+  // Another home's service doesn't read this home's service.env.
+  const servesThisHome = service.installed && service.otherBaseDir === undefined;
   return {
     service,
     connect,
     connectRevoked,
-    lan: Option.getOrElse(lan, () => service.installed),
-    lanFromOldDefault: Option.isNone(lan) && service.installed,
+    lan: Option.getOrElse(lan, () => servesThisHome),
+    lanFromOldDefault: Option.isNone(lan) && servesThisHome,
     host: entries.T3CODE_HOST,
   } satisfies Setup;
 });
 
 /**
  * The routes `t3 up` starts from. With no route flag it asks about every
- * route, starting a machine with no service from T3 Connect. Any route flag
+ * route, starting a machine with no service from D3 Connect. Any route flag
  * means it asks nothing and keeps the routes not named as they are.
  */
 export const planRoutes = (
@@ -114,7 +116,7 @@ export const planRoutes = (
   };
 };
 
-/** A running service reads T3CODE_LAN and its T3 Connect link only when it starts. */
+/** A running service reads T3CODE_LAN and its D3 Connect link only when it starts. */
 const needsRestart = (before: Routes, after: Routes) =>
   after.lan !== before.lan || (after.connect && !before.connect);
 
@@ -125,6 +127,14 @@ const CHOICES = {
 
 const formatSetup = (setup: Setup) => {
   const { service } = setup;
+  // This home's access settings reach no service, so only the service is shown.
+  if (service.otherBaseDir !== undefined) {
+    return [
+      `  ${"Service".padEnd(15)}installed for another T3 home · ${service.otherBaseDir}`,
+      "",
+      `Pass \`${BootService.formatBootServiceBaseDirOption(service.otherBaseDir)}\` to manage it.`,
+    ].join("\n");
+  }
   const rows: ReadonlyArray<readonly [string, string]> = [
     [
       "Service",
@@ -171,12 +181,12 @@ const formatSetup = (setup: Setup) => {
   ].join("\n");
 };
 
-const formatNextSteps = (routes: Routes, serviceInstalled: boolean) =>
+const formatNextSteps = (routes: Routes, serviceInstalled: boolean, pairCommand: string) =>
   [
     ...(routes.connect
       ? ["On your other device, sign in to D3 Connect with the same account."]
       : []),
-    ...(routes.lan ? ["Run `t3 pair`. Use the code on your other device."] : []),
+    ...(routes.lan ? [`Run \`${pairCommand}\`. Use the code on your other device.`] : []),
     ...(routes.connect || routes.lan
       ? []
       : [
@@ -197,7 +207,19 @@ const setUp = Effect.fn("cli.up")(function* (flags: {
 }) {
   const { baseDir } = yield* ServerConfig.ServerConfig;
   const service = yield* BootService.BootService;
+  const baseDirArgs = Option.match(flags.baseDir, {
+    onNone: () => [],
+    onSome: (dir) => ["--base-dir", dir],
+  });
+  const { command: pairCommand } = yield* resolveHostCliCommand("pair", baseDirArgs);
   const before = yield* readSetup();
+  // Before any question or write: install would refuse only after both.
+  if (before.service.otherBaseDir !== undefined) {
+    return yield* new BootService.BootServiceOtherBaseDirError({
+      installedBaseDir: before.service.otherBaseDir,
+      baseDir,
+    });
+  }
   if (before.connect === null && Option.getOrElse(flags.connect, () => false)) {
     return yield* new CliError.UserError({
       cause: "connect",
@@ -252,7 +274,7 @@ const setUp = Effect.fn("cli.up")(function* (flags: {
       yield* disconnectCloud({ clearAuthorization: false });
     }
     if (current.lan) yield* CliService.writeServiceEnv(baseDir, { T3CODE_LAN: "false" });
-    return yield* Console.log(formatNextSteps(routes, false));
+    return yield* Console.log(formatNextSteps(routes, false, pairCommand));
   }
   const { installedVersion } = before.service;
   const newer =
@@ -301,7 +323,7 @@ const setUp = Effect.fn("cli.up")(function* (flags: {
   yield* CliService.writeServiceEnv(baseDir, { T3CODE_LAN: String(routes.lan) });
   // When the service step fails, an installed service still runs with the old
   // value, so the file goes back to match it.
-  // A new T3 Connect link is undone too, with any tunnel the failed start saved, so a
+  // A new D3 Connect link is undone too, with any tunnel the failed start saved, so a
   // rerun sees it as a change and restarts. The sign-in stays.
   const restoreServiceEnv = before.service.installed
     ? CliService.writeServiceEnv(baseDir, { T3CODE_LAN: previousLan }).pipe(
@@ -327,7 +349,7 @@ const setUp = Effect.fn("cli.up")(function* (flags: {
 
   const printServeCommand = Effect.fn(function* (reason: string) {
     const { command } = yield* resolveHostCliCommand("serve", [
-      ...Option.match(flags.baseDir, { onNone: () => [], onSome: (dir) => ["--base-dir", dir] }),
+      ...baseDirArgs,
       // Explicit either way, so a T3CODE_LAN in the shell cannot override the choice.
       routes.lan ? "--lan" : "--no-lan",
     ]);
@@ -362,8 +384,9 @@ const setUp = Effect.fn("cli.up")(function* (flags: {
     if ("failed" in result && before.service.installed) {
       // The old service still runs, so a foreground server would clash with it.
       yield* restoreServiceEnv;
+      const { command } = yield* resolveHostCliCommand("up", baseDirArgs);
       yield* Console.log(
-        `Service setup failed: ${result.failed} Fix that, then run \`t3 up\` again.`,
+        `Service setup failed: ${result.failed} Fix that, then run \`${command}\` again.`,
       );
     } else if ("failed" in result) {
       yield* printServeCommand(`Service setup failed: ${result.failed}`);
@@ -382,7 +405,8 @@ const setUp = Effect.fn("cli.up")(function* (flags: {
           }),
         ).pipe(Effect.catchTags({ QuitError: () => Effect.succeed(false) })));
       if (!confirmed) {
-        yield* Console.log("Run `t3 service restart` to turn D3 Connect off.");
+        const { command } = yield* resolveHostCliCommand("service restart", baseDirArgs);
+        yield* Console.log(`Run \`${command}\` to turn D3 Connect off.`);
       } else {
         if (!interactive && !stopped) {
           yield* Console.log("Restarting D3 Code. Running agent turns will stop.");
@@ -393,7 +417,7 @@ const setUp = Effect.fn("cli.up")(function* (flags: {
         }
         if (outcome === "skipped") {
           yield* Console.log(
-            "The installed service runs another D3 home, so it was not restarted. Pass its --base-dir.",
+            "The installed service was not restarted. Run `t3 service status` to see why.",
           );
         }
         started = outcome === "restarted";
@@ -408,6 +432,7 @@ const setUp = Effect.fn("cli.up")(function* (flags: {
     `\nThis machine\n${formatSetup(after)}\n\n${formatNextSteps(
       { connect: after.connect === true, lan: after.lan },
       after.service.installed,
+      pairCommand,
     )}`,
   );
 });
@@ -472,6 +497,7 @@ const setupJson = (setup: Setup) =>
         supported: setup.service.supported,
         installed: setup.service.installed,
         installedVersion: setup.service.installedVersion ?? null,
+        otherBaseDir: setup.service.otherBaseDir ?? null,
       },
       connect:
         setup.connect === null ? null : { enabled: setup.connect, revoked: setup.connectRevoked },
@@ -502,7 +528,7 @@ export const statusCommand = Command.make("status", {
       const config = yield* resolveCliAuthConfig(flags, yield* GlobalFlag.LogLevel, {
         quietLogs: flags.json,
       });
-      // Only what readSetup reads: no database, unlike the T3 Connect commands.
+      // Only what readSetup reads: no database, unlike the D3 Connect commands.
       const setup = yield* readSetup().pipe(
         Effect.provide(
           Layer.merge(CliService.layer(config), ServerSecretStore.layer).pipe(
@@ -513,7 +539,9 @@ export const statusCommand = Command.make("status", {
       yield* Console.log(
         flags.json
           ? setupJson(setup)
-          : `This machine\n${formatSetup(setup)}\n\nChange access: \`t3 up\`.`,
+          : setup.service.otherBaseDir !== undefined
+            ? `This machine\n${formatSetup(setup)}`
+            : `This machine\n${formatSetup(setup)}\n\nChange access: \`t3 up\`.`,
       );
     }),
   ),

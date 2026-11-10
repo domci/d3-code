@@ -43,8 +43,8 @@ import { cn } from "../../lib/cn";
 import { useProjects } from "../../state/entities";
 import { sourceControlEnvironment } from "../../state/sourceControl";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { useWorkspaceSurface } from "../workspace/useWorkspaceSurface";
-import { ListFilterMenu } from "../workspace/ListFilterMenu";
+import { useDeviceType } from "../../native/native-layout-metrics";
+import { ListFilterMenu } from "../layout/workspace/ListFilterMenu";
 import { BoardThreadSheet } from "./BoardThreadSheet";
 
 type Repository = BoardRepository<EnvironmentProject>;
@@ -104,7 +104,7 @@ const boardAtomsFamily = Atom.family((serialized: string) => {
 
 /** The GitHub Projects of the user's repositories, one column per Status. */
 export function BoardScreen() {
-  const surface = useWorkspaceSurface();
+  const cover = useDeviceType() === "duo-folded";
   const registry = useContext(RegistryContext);
   const allProjects = useProjects();
   const repos = dedupeBoardRepositories(allProjects);
@@ -359,10 +359,9 @@ export function BoardScreen() {
 
   const scopeMissing = failures.some((failure) => failure.scopeMissing);
   return (
-    <View collapsable={false} className={`flex-1 ${surface.className}`}>
+    <View collapsable={false} className={`flex-1 ${cover ? "bg-drawer" : "bg-screen"}`}>
       <AppBar
         title="Board"
-        sidebar={false}
         hideBottomBorder
         search={
           loaded.length === 0

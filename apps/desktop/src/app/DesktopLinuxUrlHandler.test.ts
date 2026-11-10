@@ -241,10 +241,10 @@ describe("DesktopLinuxUrlHandler", () => {
 
     return Effect.gen(function* () {
       yield* runRegister(recorded, {
-        environment: { desktopLauncherPath: Option.some("/opt/T3 Code/t3code") },
+        environment: { desktopLauncherPath: Option.some("/opt/D3 Code/t3code") },
       });
 
-      assert.include(recorded.files[0]?.content, 'Exec="/opt/T3 Code/t3code" %U');
+      assert.include(recorded.files[0]?.content, 'Exec="/opt/D3 Code/t3code" %U');
     });
   });
 
@@ -381,7 +381,7 @@ describe("DesktopLinuxUrlHandler", () => {
               if (!ChildProcess.isStandardCommand(command)) {
                 return yield* Effect.die("expected a single registration command");
               }
-              recorded.commands.push({ command: command.command, args: command.args });
+              recorded.commands.push({ command: command.command, args: command.args.map(String) });
               if (command.command !== stalledHelper) return mockProcess(0);
               const child = yield* realSpawner.spawn(
                 ChildProcess.make(

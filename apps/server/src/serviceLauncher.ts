@@ -219,6 +219,17 @@ const filesystemBackupSpaceProbe: BackupSpaceProbe = {
   canClone: backupCanClone,
 };
 
+// A killed launcher skips the backup's cleanup, and retries only clear their own update's copy.
+// Update requests are refused while one is pending, so no staging directory is still in use here.
+async function removeAbandonedBackupCopies(backupRoot: string): Promise<void> {
+  for (const entry of await NodeFSP.readdir(backupRoot)) {
+    if (!entry.endsWith(".staging")) continue;
+    await NodeFSP.rm(NodePath.join(backupRoot, entry), { recursive: true, force: true }).catch(
+      () => undefined,
+    );
+  }
+}
+
 /** Check before stopping the server so full disks refuse updates without an outage. */
 export async function databaseBackupBlocker(
   baseDir: string,
@@ -228,6 +239,7 @@ export async function databaseBackupBlocker(
   const { readFreeBytes, canClone } = { ...filesystemBackupSpaceProbe, ...probe };
   const backupRoot = NodePath.join(baseDir, "runtime", "db-backup");
   await NodeFSP.mkdir(backupRoot, { recursive: true, mode: 0o700 });
+  await removeAbandonedBackupCopies(backupRoot);
   const [files, free] = await Promise.all([statDatabaseFiles(dbPath), readFreeBytes(backupRoot)]);
   const size = files.reduce((total, file) => total + file.size, 0);
   const fullCopyBytes = size * 1.05;
@@ -789,7 +801,7 @@ export class Launcher {
     // Signal listeners alone do not keep Node alive.
     this.#timer = setInterval(() => {}, 2_147_483_647);
     process.stderr.write(
-      "[service-launcher] Another T3 Code server owns this T3 home. Stop it, then restart this service.\n",
+      "[service-launcher] Another D3 Code server owns this T3 home. Stop it, then restart this service.\n",
     );
   }
 

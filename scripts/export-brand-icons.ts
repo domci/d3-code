@@ -101,9 +101,9 @@ export const exportBrandIcons = Effect.fn("exportBrandIcons")(function* (checkOn
           `${webPrefix}-web-favicon.ico`,
           encodePngIco(sizes.filter(({ size }) => size === 16 || size === 32)),
         );
-        for (const size of [16, 32, 180]) {
+        for (const size of [16, 32, 180, 192, 512]) {
           outputs.set(
-            `${webPrefix}-web-${size === 180 ? "apple-touch-180" : `favicon-${size}x${size}`}.png`,
+            `${webPrefix}-web-${size === 180 ? "apple-touch-180" : size >= 192 ? `icon-${size}x${size}` : `favicon-${size}x${size}`}.png`,
             await sharp(ios).resize(size, size).png().toBuffer(),
           );
         }

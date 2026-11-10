@@ -267,9 +267,13 @@ export const resolveServerConfig = Effect.fn("config.resolveServerConfig")(funct
     readonly startupPresentation?: ServerConfig.StartupPresentation;
     readonly forceAutoBootstrapProjectFromCwd?: boolean;
     readonly rejectRunningServer?: boolean;
+    readonly selectAutomaticPort?: (
+      preferred: number,
+    ) => Effect.Effect<number, NetService.NetError | CliError.UserError>;
   },
 ) {
   const { findAvailablePort } = yield* NetService.NetService;
+  const selectAutomaticPort = options?.selectAutomaticPort ?? findAvailablePort;
   const path = yield* Path.Path;
   const fs = yield* FileSystem.FileSystem;
   const env = yield* EnvServerConfig;
@@ -316,7 +320,7 @@ export const resolveServerConfig = Effect.fn("config.resolveServerConfig")(funct
         if (mode === "desktop") {
           return Effect.succeed(ServerConfig.DEFAULT_PORT);
         }
-        return findAvailablePort(ServerConfig.DEFAULT_PORT);
+        return selectAutomaticPort(ServerConfig.DEFAULT_PORT);
       },
     },
   );
@@ -421,7 +425,7 @@ export const resolveServerConfig = Effect.fn("config.resolveServerConfig")(funct
     Option.fromUndefinedOr(bootstrap?.host),
   );
   // Private networks only, so clients learn a LAN address and prefer it over
-  // T3 Connect. `t3 service install` writes T3CODE_LAN=false for a new
+  // D3 Connect. `t3 service install` writes T3CODE_LAN=false for a new
   // service; one installed before T3CODE_LAN existed keeps listening.
   const lan = resolveOptionPrecedence(normalizedFlags.lan, Option.fromUndefinedOr(env.lan));
   const privateNetworkOnly =
