@@ -46,7 +46,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer home
         },
       );
       expect(status, stdout + stderr).toBe(0);
-      expect(stderr).toContain(`Installed T3 Code ${version}`);
+      expect(stderr).toContain(`Installed upstream T3 Code ${version}`);
       expect(await NodeFSP.readlink(launcher)).toBe(NodePath.join(target, "t3"));
       expect(
         NodeChildProcess.execFileSync(launcher, ["--version"], {
@@ -119,7 +119,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer chan
         },
       );
       expect(code, output).toBe(0);
-      expect(output).toContain(`Installed D3 Code ${version}`);
+      expect(output).toContain(`Installed upstream T3 Code ${version}`);
     } finally {
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -452,7 +452,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer chec
           } else {
             expect(code).not.toBe(0);
             expect(output).toContain("checksum mismatch");
-            expect(output).not.toContain("Installed D3 Code");
+            expect(output).not.toContain("Installed upstream T3 Code");
             expect(await NodeFSP.readdir(versions)).toEqual([]);
           }
         } finally {

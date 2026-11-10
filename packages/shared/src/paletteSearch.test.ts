@@ -213,15 +213,15 @@ describe("scoreThreadSearch", () => {
           branch: "t3/diagnose-connect",
           projectTitle: "t3code",
         }),
-        thread("D3 Connect Tunnel Lifecycle Review", { projectTitle: "t3code" }),
+        thread("T3 Connect Tunnel Lifecycle Review", { projectTitle: "t3code" }),
       ])[0],
-    ).toBe("D3 Connect Tunnel Lifecycle Review");
+    ).toBe("T3 Connect Tunnel Lifecycle Review");
     expect(
       rankTitles("t3code", [
         thread("Fix sidebar lag", { ...busy, projectTitle: "t3code", branch: "t3code/sidebar" }),
-        thread("D3 Code vs Gemini Token Volume", { projectTitle: "slophouse" }),
+        thread("T3 Code vs Gemini Token Volume", { projectTitle: "slophouse" }),
       ])[0],
-    ).toBe("D3 Code vs Gemini Token Volume");
+    ).toBe("T3 Code vs Gemini Token Volume");
   });
 
   it("matches pull request numbers, branches, and projects with every token somewhere", () => {
@@ -360,7 +360,7 @@ describe("scoreThreadSearch beyond Latin text and titles", () => {
     // Short words before a mere prefix are a coincidence.
     expect(rankTitles("inth", [thread("Show skill names in thread overview")])).toEqual([]);
     expect(rankTitles("tos", [thread("Move Client State to Server")])).toEqual([]);
-    expect(rankTitles("t3co", [thread("D3 Code vs Gemini")])).toEqual(["D3 Code vs Gemini"]);
+    expect(rankTitles("t3co", [thread("T3 Code vs Gemini")])).toEqual(["T3 Code vs Gemini"]);
     expect(rankTitles('"sidebar lag"', [thread("Fix sidebar lag")])).toEqual(["Fix sidebar lag"]);
     // A pasted query with a separate accent mark matches the composed title.
     expect(rankTitles("cafe\u0301", [thread("Café menu")])).toEqual(["Café menu"]);

@@ -7,8 +7,9 @@ import {
   type PullRequestDetailView,
 } from "@t3tools/contracts";
 import { expect, it, vi } from "vite-plus/test";
+import { page } from "vite-plus/test/browser";
 import { DraftId, useComposerDraftStore } from "~/composerDraftStore";
-import { act, render } from "../../../test/render";
+import { render } from "../../../test/render";
 
 const { permissions } = vi.hoisted(() => ({
   permissions: { checkout: true, operate: true },
@@ -157,7 +158,11 @@ it("can still add conflict resolution to an existing composer without checkout s
   await using screen = await render(panel(true));
   const resolve = screen.getByRole("button", { name: "Resolve conflicts" });
   await expect.element(resolve).toBeEnabled();
-  await act(() => resolve.click());
+  await resolve.click();
+  await expect
+    .element(page.getByRole("menuitem", { name: "Resolve in new session" }))
+    .toBeDisabled();
+  await page.getByRole("menuitem", { name: "Resolve in this session" }).click();
   const draft = useComposerDraftStore.getState().getComposerDraft(draftId);
   expect(draft?.prompt).toContain("conflicts");
   expect(draft?.prompt).toContain(detail.url);
