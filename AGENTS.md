@@ -215,8 +215,8 @@ Architecture and its constraints: `docs/internals/overview.md`. Glossary: `docs/
 
 This checkout is Dom's fork (`domci/d3-code`, branch `main`). Two machines, both keep it at `~/repos/d3-code`:
 
-- **`server`** (Linux, `ssh dom@server`): runs the live server as the systemd user service `d3-code-server`, straight from this checkout's source, on `100.91.138.30:3773` with data in `~/.d3` (`~/.t3` stays as a symlink to it so paths stored before the rename keep resolving). Node 24 and pnpm: `export PATH=~/.volta/tools/image/node/24.21.0/bin:~/.cache/t3code-tools/bin:$PATH`.
-- **Mac** (`ssh dom@Dominiks-MacBook-Pro`, login shell is fish, so pipe scripts to `bash -s`): builds and runs the desktop app `/Applications/D3 Code.app`. Node 24 and Rust: `export PATH=~/.cargo/bin:~/.volta/tools/image/node/24.18.0/bin:~/.cache/t3code-tools/bin:/opt/homebrew/bin:$PATH`.
+- **`server`** (Linux, `ssh dom@server`): runs the live server as the systemd user service `d3-code-server`, straight from this checkout's source, on `100.91.138.30:3773` with data in `~/.d3` (`~/.t3` stays as a symlink to it so paths stored before the rename keep resolving). Node 26.12.1 and pnpm: `export PATH=~/.cache/t3code-tools/node-26.12.1/bin:~/.cache/t3code-tools/bin:$PATH`.
+- **Mac** (`ssh dom@Dominiks-MacBook-Pro`, login shell is fish, so pipe scripts to `bash -s`): builds and runs the desktop app `/Applications/D3 Code.app`. Node 26.12.1 and Rust: `export PATH=~/.cargo/bin:~/.cache/t3code-tools/node-26.12.1/bin:~/.cache/t3code-tools/bin:/opt/homebrew/bin:$PATH`.
 
 Release a change:
 

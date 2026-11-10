@@ -278,7 +278,7 @@ overrides:
   undici@>=6.0.0 <6.29.1: 6.29.1
   undici@>=7.0.0 <7.30.1: 7.30.1
   fast-uri@>=3.0.0 <3.1.9: 3.1.9
-  seroval@>=1.0.0 <1.6.11: 1.6.11
+  seroval@>=1.0.0 <1.8.0: 1.8.0
   proxy-addr@>=2.0.0 <2.0.8: 2.0.8
   shell-quote@>=1.8.4 <1.11.0: 1.11.0
   dompurify@>=3.0.0 <3.4.17: 3.4.17
@@ -11226,11 +11226,11 @@ packages:
     resolution: {integrity: sha512-SCfCNzJ8CEz3spf1jNd6XE7mrtrKMchVRMGLFNUEXjY0wIUhKl1bXhkNG3/i0X8uLCWLOhUdMjcM286JZqnCbg==}
     engines: {node: '>=20'}
     peerDependencies:
-      seroval: 1.6.11
+      seroval: 1.8.0
 
-  seroval@1.6.11:
-    resolution: {integrity: sha512-hpb6XnMCGN/A+79Uf8V7/iTGkyyyazNn5X0CoCAp7Uy9vT3RT8jZ9GLcnxGoVjg3P8AArbe4ZVHq6C8oT2a0kA==}
-    engines: {node: '>=10'}
+  seroval@1.8.0:
+    resolution: {integrity: sha512-W5N4cMPc58lypAsScCmhGTyZxNZ6gPHvLHtMqtyvDFpfyNDsH1QjU0nI9Lr34+Q5ZLPsWeqOhkgTY5XtaPVQ4A==}
+    engines: {node: '>=20'}
 
   serve-static@1.16.3:
     resolution: {integrity: sha512-x0RTqQel6g5SY7Lg6ZreMmsOzncHFU7nhnRWkKgWuMTu5NN0DR5oruckMqRvacAN9d5w6ARnRBXl9xhDCgfMeA==}
@@ -16003,8 +16003,8 @@ snapshots:
     dependencies:
       '@tanstack/history': 1.162.0
       cookie-es: 3.1.1
-      seroval: 1.6.11
-      seroval-plugins: 1.7.8(seroval@1.6.11)
+      seroval: 1.8.0
+      seroval-plugins: 1.7.8(seroval@1.8.0)
 
   '@tanstack/router-generator@1.167.12(supports-color@8.1.1)':
     dependencies:
@@ -21512,11 +21512,11 @@ snapshots:
       type-fest: 0.13.1
     optional: true
 
-  seroval-plugins@1.7.8(seroval@1.6.11):
+  seroval-plugins@1.7.8(seroval@1.8.0):
     dependencies:
-      seroval: 1.6.11
+      seroval: 1.8.0
 
-  seroval@1.6.11: {}
+  seroval@1.8.0: {}
 
   serve-static@1.16.3(supports-color@8.1.1):
     dependencies:
