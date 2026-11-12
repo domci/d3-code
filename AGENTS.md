@@ -225,3 +225,12 @@ Release a change:
 3. Server changes (`apps/server`, contracts): on `server` run `systemctl --user restart d3-code-server`. This interrupts running agents, so ask Dom first. Logs: `journalctl --user -u d3-code-server -f`.
 
 Keep `t3` spellings that are identifiers (`refs/t3/...`, bundle id `com.t3tools.t3code`, `t3` CLI, `t3.json`, MCP tool names): renaming them cuts the app off from existing data.
+
+<!-- ci-wait:start -->
+## CI wait time
+
+- Waiting on CI is work time. While a run is in flight, improve the pipeline: cut slow or redundant jobs and steps, cache dependencies, parallelize or shard, run only what the changed paths need, and drop checks that hooks or another job already own.
+- Use the same wait for the `test-audit` skill (`/test-audit`): remove tests that re-assert source, duplicate stronger proof, or keep test-only seams alive; keep tests that guard shipped contracts.
+- Ship CI and test cleanup as its own small commit or PR, separate from the feature change. Never weaken a release gate, security check, or required status just to make CI faster.
+- Note the run's wall-clock time before and after in the PR or commit message.
+<!-- ci-wait:end -->
