@@ -230,6 +230,8 @@ Release a change:
 
 Keep `t3` spellings that are identifiers (`refs/t3/...`, bundle id `com.t3tools.t3code`, `t3` CLI, `t3.json`, MCP tool names): renaming them cuts the app off from existing data.
 
+Merging upstream T3 Code: follow [Merging upstream T3 Code](docs/operations/upstream-merge.md), which runs `scripts/upstream-merge/merge.py`. To keep merges small, put fork features in fork-owned files with a one-line hook into upstream code, and wrap new fork copy in `<T>`, `gt()` or `msg()`.
+
 <!-- ci-wait:start -->
 
 ## CI wait time
