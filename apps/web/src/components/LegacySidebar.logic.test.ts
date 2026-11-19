@@ -207,13 +207,17 @@ describe("visible rows and reveal", () => {
 
   it("opens only the folds above the thread, and nothing for rows that are already visible", () => {
     const reveal = (key: string) => resolveThreadReveal(tree, key);
-    expect(reveal("e:a")).toEqual({ settled: false, foldedParentKeys: [] });
-    expect(reveal("e:busy")).toEqual({ settled: false, foldedParentKeys: ["e:a"] });
-    expect(reveal("e:f")).toEqual({ settled: false, foldedParentKeys: [] });
-    expect(reveal("e:deep")).toEqual({ settled: false, foldedParentKeys: ["e:a", "e:done"] });
-    expect(reveal("e:z")).toEqual({ settled: true, foldedParentKeys: [] });
-    expect(reveal("e:zDone")).toEqual({ settled: true, foldedParentKeys: ["e:z"] });
+    expect(reveal("e:a")).toEqual({ group: "active", foldedParentKeys: [] });
+    expect(reveal("e:busy")).toEqual({ group: "active", foldedParentKeys: ["e:a"] });
+    expect(reveal("e:f")).toEqual({ group: "active", foldedParentKeys: [] });
+    expect(reveal("e:deep")).toEqual({ group: "active", foldedParentKeys: ["e:a", "e:done"] });
+    expect(reveal("e:z")).toEqual({ group: "settled", foldedParentKeys: [] });
+    expect(reveal("e:zDone")).toEqual({ group: "settled", foldedParentKeys: ["e:z"] });
     expect(reveal("e:elsewhere")).toBeNull();
+    expect(resolveThreadReveal({ ...tree, active: [], snoozed: [a] }, "e:busy")).toEqual({
+      group: "snoozed",
+      foldedParentKeys: ["e:a"],
+    });
   });
 });
 
@@ -304,6 +308,29 @@ describe("manual session order", () => {
     expect(ids(active)).toEqual(["p"]);
     expect(ids(settled)).toEqual(["s2", "s1"]);
     expect(ids([...(childrenByParentKey.get("e:p") ?? [])])).toEqual(["c"]);
+  });
+
+  it("moves threads snoozed past now into their own group, soonest wake first", () => {
+    const { active, settled, snoozed, childrenByParentKey } = buildProjectThreadOrder(
+      [
+        make("late", "2026-01-01T00:00:00Z", { snoozedUntil: "2026-02-03T00:00:00Z" }),
+        make("soon", "2026-01-02T00:00:00Z", {
+          snoozedUntil: "2026-02-02T00:00:00Z",
+          settledOverride: "settled",
+        }),
+        make("woke", "2026-01-03T00:00:00Z", { snoozedUntil: "2026-01-31T00:00:00Z" }),
+        make("c", "2026-01-04T00:00:00Z", {
+          lineage: { relationshipToParent: "subagent", parentThreadId: "late" },
+        }),
+      ],
+      "updated_at",
+      undefined,
+      "2026-02-01T00:00:00Z",
+    );
+    expect(ids(snoozed)).toEqual(["soon", "late"]);
+    expect(ids(active)).toEqual(["woke"]);
+    expect(settled).toEqual([]);
+    expect(ids([...(childrenByParentKey.get("e:late") ?? [])])).toEqual(["c"]);
   });
 
   it("keeps subagents with their parent while allowing forks in another folder", () => {

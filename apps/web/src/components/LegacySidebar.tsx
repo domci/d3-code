@@ -3,6 +3,7 @@ import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePull
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/client-runtime/thread-pull-requests";
 import { Spinner } from "~/components/ui/spinner";
 import {
+  AlarmClockIcon,
   ArrowUpDownIcon,
   ChevronRightIcon,
   GitForkIcon,
@@ -225,10 +226,14 @@ import {
   SidebarChromeHeader,
   sortSidebarV2ProjectGroups,
   useSidebarRowSubscriptionLease,
+  useSnoozeWakeClock,
   useThreadJumpHintsVisible,
   type SidebarRouteReveal,
   type ThreadStatusPill,
 } from "./LegacySidebar.upstream";
+import { T, useMessages, Var } from "gt-react";
+import { snoozeWakeLabel } from "@t3tools/client-runtime/state/thread-settled";
+import { useNowMinute } from "../hooks/useNowMinute";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useMediaQuery } from "~/hooks/useMediaQuery";
 import { CommandDialogTrigger } from "./ui/command";
@@ -361,6 +366,8 @@ interface SidebarThreadRowProps {
   isActive: boolean;
   openPullRequestsInRightPanel: boolean;
   jumpLabel: string | null;
+  /** Set on a snoozed row: its wake time, shown in place of its age. */
+  snoozedUntil?: string | null;
   renamingThreadKey: string | null;
   renamingTitle: string;
   setRenamingTitle: (title: string) => void;
@@ -420,6 +427,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     isActive,
     openPullRequestsInRightPanel,
     jumpLabel,
+    snoozedUntil,
     renamingThreadKey,
     renamingTitle,
     setRenamingTitle,
@@ -972,6 +980,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                     </TooltipTrigger>
                     <TooltipPopup side="top">{jumpLabel}</TooltipPopup>
                   </Tooltip>
+                ) : snoozedUntil ? (
+                  <span className="inline-flex items-center gap-1 text-3xs text-info-foreground tabular-nums">
+                    <AlarmClockIcon aria-hidden className="size-3" />
+                    <SnoozeWakeLabel snoozedUntil={snoozedUntil} />
+                  </span>
                 ) : (
                   <span
                     className={`text-3xs tabular-nums ${
@@ -992,6 +1005,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     </SidebarMenuSubItem>
   );
 });
+
+function SnoozeWakeLabel({ snoozedUntil }: { snoozedUntil: string }) {
+  const now = useNowMinute();
+  const messages = useMessages();
+  return snoozeWakeLabel(snoozedUntil, { now }, messages);
+}
 
 /** A top-level active row that can be dragged to a new position in its project. */
 const SortableThreadRow = memo(function SortableThreadRow(
@@ -1035,6 +1054,7 @@ interface SidebarProjectThreadListProps {
   orderedProjectThreadKeys: readonly string[];
   renderedThreads: readonly SidebarThreadSummary[];
   settledThreads: readonly SidebarThreadSummary[];
+  snoozedThreads: readonly SidebarThreadSummary[];
   /** Subagent children by `${environmentId}:${parentThreadId}`. */
   childrenByParentKey: ReadonlyMap<string, readonly SidebarThreadSummary[]>;
   /** Titles of the project's listed threads by key, for the fork tooltip. */
@@ -1046,6 +1066,8 @@ interface SidebarProjectThreadListProps {
   toggleSubagents: (parentKey: string) => void;
   isSettledExpanded: boolean;
   toggleSettledThreads: () => void;
+  isSnoozedExpanded: boolean;
+  toggleSnoozedThreads: () => void;
   showEmptyThreadState: boolean;
   shouldShowThreadPanel: boolean;
   isThreadListExpanded: boolean;
@@ -1102,6 +1124,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     orderedProjectThreadKeys,
     renderedThreads,
     settledThreads,
+    snoozedThreads,
     childrenByParentKey,
     threadTitleByKey,
     runningThreadKeys,
@@ -1109,6 +1132,8 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     toggleSubagents,
     isSettledExpanded,
     toggleSettledThreads,
+    isSnoozedExpanded,
+    toggleSnoozedThreads,
     showEmptyThreadState,
     shouldShowThreadPanel,
     isThreadListExpanded,
@@ -1137,6 +1162,12 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
   const showMoreButtonRender = <button type="button" />;
   const showLessButtonRender = <button type="button" />;
   const settledToggleButtonRender = <button type="button" />;
+  const snoozedToggleButtonRender = <button type="button" />;
+  const snoozedThreadKeys = new Set(
+    snoozedThreads.map((thread) =>
+      scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+    ),
+  );
 
   const threadDnDSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -1254,6 +1285,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
       isActive: activeRouteThreadKey === threadKey,
       openPullRequestsInRightPanel,
       jumpLabel: threadJumpLabelByKey.get(threadKey) ?? null,
+      snoozedUntil: snoozedThreadKeys.has(threadKey) ? thread.snoozedUntil : null,
       renamingThreadKey,
       renamingTitle,
       setRenamingTitle,
@@ -1398,6 +1430,34 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
               </SidebarMenuSubButton>
             </SidebarMenuSubItem>
           )}
+          {projectExpanded && snoozedThreads.length > 0 && (
+            <SidebarMenuSubItem className="w-full">
+              <SidebarMenuSubButton
+                render={snoozedToggleButtonRender}
+                data-thread-selection-safe
+                size="sm"
+                aria-expanded={isSnoozedExpanded}
+                onClick={toggleSnoozedThreads}
+              >
+                <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                  <ChevronRightIcon
+                    className={cn(
+                      "size-3 shrink-0 text-sidebar-muted-foreground",
+                      isSnoozedExpanded && "rotate-90",
+                    )}
+                  />
+                  <span>
+                    <T>
+                      Snoozed (<Var>{snoozedThreads.length}</Var>)
+                    </T>
+                  </span>
+                </span>
+              </SidebarMenuSubButton>
+            </SidebarMenuSubItem>
+          )}
+          {projectExpanded &&
+            isSnoozedExpanded &&
+            snoozedThreads.map((thread) => renderThreadRow(thread))}
           {projectExpanded &&
             settledThreads.some(
               (thread) =>
@@ -1568,13 +1628,20 @@ function useProjectThreads(
   // Subagents and nested forks hang under their parent: only the roots are rows of their own,
   // so they neither count toward the preview nor get jump slots; subagents cannot settle on
   // their own. A fork whose source is not on its side of the split is a root and counts.
+  const snoozeClock = useSnoozeWakeClock(visibleProjectThreads);
   const {
     childrenByParentKey,
     active: activeProjectThreads,
     settled: settledProjectThreads,
-  } = buildProjectThreadOrder(visibleProjectThreads, threadSortOrder, folderByThreadKey);
-  // The collapsed project's dot speaks for the rows under the active list only: settled
-  // threads are put away, and a subagent whose parent is not listed has no row at all.
+    snoozed: snoozedProjectThreads,
+  } = buildProjectThreadOrder(
+    visibleProjectThreads,
+    threadSortOrder,
+    folderByThreadKey,
+    new Date(snoozeClock).toISOString(),
+  );
+  // The collapsed project's dot speaks for the rows under the active list only: snoozed and
+  // settled threads are put away, and a subagent whose parent is not listed has no row at all.
   const projectStatus = resolveProjectStatusIndicator(
     listThreadRows(
       activeProjectThreads,
@@ -1609,6 +1676,7 @@ function useProjectThreads(
     visibleProjectThreads,
     activeProjectThreads,
     settledProjectThreads,
+    snoozedProjectThreads,
     childrenByParentKey,
     runningThreadKeys,
     threadTitleByKey,
@@ -1686,20 +1754,24 @@ function listOrderedProjectThreadKeys(input: {
   collapsedFolders: ReadonlySet<string>;
   renderedThreads: readonly SidebarThreadSummary[];
   settledProjectThreads: readonly SidebarThreadSummary[];
+  snoozedProjectThreads: readonly SidebarThreadSummary[];
   childrenByParentKey: ReadonlyMap<string, readonly SidebarThreadSummary[]>;
   runningThreadKeys: ReadonlySet<string>;
   expandedSubagentParents: ReadonlySet<string>;
   isSettledExpanded: boolean;
+  isSnoozedExpanded: boolean;
 }) {
   const {
     folders,
     collapsedFolders,
     renderedThreads,
     settledProjectThreads,
+    snoozedProjectThreads,
     childrenByParentKey,
     runningThreadKeys,
     expandedSubagentParents,
     isSettledExpanded,
+    isSnoozedExpanded,
   } = input;
   const keyOf = (thread: SidebarThreadSummary) =>
     scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
@@ -1713,6 +1785,7 @@ function listOrderedProjectThreadKeys(input: {
           ),
     ),
     ...renderedThreads.filter(unfiled),
+    ...(isSnoozedExpanded ? snoozedProjectThreads : []),
     ...(isSettledExpanded ? settledProjectThreads.filter(unfiled) : []),
   ];
   return listThreadRows(
@@ -1808,6 +1881,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     visibleProjectThreads,
     activeProjectThreads,
     settledProjectThreads,
+    snoozedProjectThreads,
     childrenByParentKey,
     runningThreadKeys,
     threadTitleByKey,
@@ -1859,6 +1933,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   // (settled, or a subagent finishing) does not, and the toggles always win afterwards.
   const [isSettledExpanded, setSettledExpanded] = useState(false);
   const toggleSettledThreads = () => setSettledExpanded((expanded) => !expanded);
+  const [isSnoozedExpanded, setSnoozedExpanded] = useState(false);
+  const toggleSnoozedThreads = () => setSnoozedExpanded((expanded) => !expanded);
   const [expandedSubagentParents, setExpandedSubagentParents] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -1877,26 +1953,40 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     }
     if (activeRouteThreadKey === null || revealRef.current.done) return;
     const reveal = resolveThreadReveal(
-      { active: activeProjectThreads, settled: settledProjectThreads, childrenByParentKey },
+      {
+        active: activeProjectThreads,
+        settled: settledProjectThreads,
+        snoozed: snoozedProjectThreads,
+        childrenByParentKey,
+      },
       activeRouteThreadKey,
     );
     if (reveal === null) return;
     revealRef.current.done = true;
     // oxlint-disable-next-line react/set-state-in-effect -- The fold opens once per navigation, after the routed thread's row is known; later toggles win.
-    if (reveal.settled) setSettledExpanded(true);
+    if (reveal.group === "settled") setSettledExpanded(true);
+    if (reveal.group === "snoozed") setSnoozedExpanded(true);
     if (reveal.foldedParentKeys.length > 0) {
       setExpandedSubagentParents((current) => new Set([...current, ...reveal.foldedParentKeys]));
     }
-  }, [activeProjectThreads, activeRouteThreadKey, childrenByParentKey, settledProjectThreads]);
+  }, [
+    activeProjectThreads,
+    activeRouteThreadKey,
+    childrenByParentKey,
+    settledProjectThreads,
+    snoozedProjectThreads,
+  ]);
   const orderedProjectThreadKeys = listOrderedProjectThreadKeys({
     folders,
     collapsedFolders,
     renderedThreads,
     settledProjectThreads,
+    snoozedProjectThreads,
     childrenByParentKey,
     runningThreadKeys,
     expandedSubagentParents,
     isSettledExpanded,
+    isSnoozedExpanded,
   });
 
   const handleReorderThread = (movedKey: string, overKey: string) => {
@@ -2820,6 +2910,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         orderedProjectThreadKeys={orderedProjectThreadKeys}
         renderedThreads={renderedThreads}
         settledThreads={settledProjectThreads}
+        snoozedThreads={snoozedProjectThreads}
         childrenByParentKey={childrenByParentKey}
         threadTitleByKey={threadTitleByKey}
         runningThreadKeys={runningThreadKeys}
@@ -2827,6 +2918,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         toggleSubagents={toggleSubagents}
         isSettledExpanded={isSettledExpanded}
         toggleSettledThreads={toggleSettledThreads}
+        isSnoozedExpanded={isSnoozedExpanded}
+        toggleSnoozedThreads={toggleSnoozedThreads}
         showEmptyThreadState={showEmptyThreadState}
         shouldShowThreadPanel={shouldShowThreadPanel}
         isThreadListExpanded={isThreadListExpanded}
@@ -3578,6 +3671,7 @@ function useLegacySidebarThreads(input: {
     expandedThreadListsByProject,
   } = input;
   const sidebarThreads = useThreadShells();
+  const snoozeClock = useSnoozeWakeClock(sidebarThreads);
   const projectExpandedById = useUiStateStore((store) => store.projectExpandedById);
   const collapsedFolders = useThreadFolderExpansion((state) => state.collapsed);
   const sidebarThreadByKey = new Map(
@@ -3615,6 +3709,7 @@ function useLegacySidebarThreads(input: {
       ),
       sidebarThreadSortOrder,
       folderByThreadKey,
+      new Date(snoozeClock).toISOString(),
     );
     const projectExpanded = resolveProjectExpanded(
       projectExpandedById,
@@ -3624,7 +3719,7 @@ function useLegacySidebarThreads(input: {
     if (!projectExpanded) {
       return [];
     }
-    // Unfiled settled threads sit in a collapsed group, so they get no jump slots.
+    // Snoozed and unfiled settled threads sit in collapsed groups, so they get no jump slots.
     const activeThreadKey = routeThreadKey ?? undefined;
     const isThreadListExpanded = expandedThreadListsByProject.has(project.projectKey);
     const unfiled = activeThreads.filter(

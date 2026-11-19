@@ -10,6 +10,7 @@ export {
   resolveThreadStatusPill,
   sortSidebarV2ProjectGroups,
   useSidebarRowSubscriptionLease,
+  useSnoozeWakeClock,
   useThreadJumpHintsVisible,
   type ThreadStatusPill,
 } from "./Sidebar.logic";

@@ -2159,6 +2159,15 @@
   "c7c6c2345a741768": "Pedido de convidado",
   "c37d2b47b70c3f7c": "Conectando",
   "04ab29f86a91dd64": "Plano pronto",
+  "4b2b87fbafc5500a": [
+    "Snoozed (",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    ")"
+  ],
   "9e4394e5b89e57a1": "Restaurando suas threads…",
   "5579a5d039c6962c": "{count, plural, one {Migrando {total} thread da versão anterior. Você pode continuar trabalhando enquanto isso termina.} other {Migrando {total} threads da versão anterior. Você pode continuar trabalhando enquanto isso termina.}}",
   "8117d2b1eaef9f82": [
@@ -11669,12 +11678,12 @@
   "9c73aa0c2e2b4e7d": "Escolher atalho",
   "f249ff80891e5443": "Switch to dark mode",
   "40369e5934d94f8d": "Switch to light mode",
-  "300a948f90c4d75c": "Voltar",
-  "2a50e229df85d553": "Avançar",
-  "652f6999ffc8d3bc": "Início do D3 Code",
   "8e9626aa27cb188a": "Issues",
   "0c53fef866977e24": "Board",
   "9d2fc1003e82feb1": "Uso",
+  "300a948f90c4d75c": "Voltar",
+  "2a50e229df85d553": "Avançar",
+  "652f6999ffc8d3bc": "Início do D3 Code",
   "20283eb1dd6119f9": "{count, plural, one {{count} anexo} other {{count} anexos}}",
   "ffedb03b620f97a9": "Rascunho não enviado",
   "90a349d827d1dcf5": "Descartar rascunho",

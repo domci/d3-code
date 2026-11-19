@@ -7,6 +7,7 @@ import {
   sortActiveThreadsByOrderKey,
   sortThreads,
 } from "@t3tools/client-runtime/state/thread-sort";
+import { effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 
 import type { SidebarThreadSummary } from "../types";
 import type { ThreadStatusPill } from "./LegacySidebar.upstream";
@@ -140,18 +141,22 @@ export function listThreadRows<T extends SubagentTreeThread & { readonly created
 }
 
 /**
- * What has to open for the row of `threadKey` to be on screen: the Settled group and the
- * subagent folds (parent keys) above it. Null when the thread has no row here.
+ * What has to open for the row of `threadKey` to be on screen: its group (Snoozed and Settled
+ * are folded) and the subagent folds (parent keys) above it. Null when the thread has no row here.
  * Used to reveal a thread once when it is navigated to; the user's toggles win afterwards.
  */
 export function resolveThreadReveal<T extends SubagentTreeThread>(
   tree: {
     readonly active: readonly T[];
     readonly settled: readonly T[];
+    readonly snoozed?: readonly T[];
     readonly childrenByParentKey: ReadonlyMap<string, readonly T[]>;
   },
   threadKey: string,
-): { readonly settled: boolean; readonly foldedParentKeys: string[] } | null {
+): {
+  readonly group: "active" | "snoozed" | "settled";
+  readonly foldedParentKeys: string[];
+} | null {
   const find = (thread: T, folds: string[]): string[] | null => {
     const key = subagentTreeKey(thread);
     if (key === threadKey) return folds;
@@ -162,10 +167,10 @@ export function resolveThreadReveal<T extends SubagentTreeThread>(
     }
     return null;
   };
-  for (const settled of [false, true]) {
-    for (const root of settled ? tree.settled : tree.active) {
+  for (const group of ["active", "snoozed", "settled"] as const) {
+    for (const root of tree[group] ?? []) {
       const foldedParentKeys = find(root, []);
-      if (foldedParentKeys) return { settled, foldedParentKeys };
+      if (foldedParentKeys) return { group, foldedParentKeys };
     }
   }
   return null;
@@ -188,10 +193,13 @@ export function buildProjectThreadOrder<T extends SidebarThreadSummary>(
   threads: readonly T[],
   sortOrder: SidebarThreadSortOrder,
   folderByThreadKey?: ReadonlyMap<string, string>,
+  /** Threads snoozed past it leave both lists for `snoozed`, soonest wake first. */
+  now?: string,
 ): {
   readonly roots: T[];
   readonly active: T[];
   readonly settled: T[];
+  readonly snoozed: T[];
   readonly childrenByParentKey: ReadonlyMap<string, readonly T[]>;
 } {
   const { roots, childrenByParentKey } = buildSubagentTree(
@@ -199,11 +207,15 @@ export function buildProjectThreadOrder<T extends SidebarThreadSummary>(
     MAX_SUBAGENT_TREE_DEPTH,
     folderByThreadKey,
   );
-  const { active, settled } = partitionSettledThreads(roots);
+  const isSnoozed = (thread: T) => now !== undefined && effectiveSnoozed(thread, { now });
+  const { active, settled } = partitionSettledThreads(roots.filter((t) => !isSnoozed(t)));
   return {
     roots,
     active: sortOrder === "manual" ? sortActiveThreadsByOrderKey(active) : active,
     settled,
+    snoozed: roots
+      .filter(isSnoozed)
+      .toSorted((a, b) => Date.parse(a.snoozedUntil ?? "") - Date.parse(b.snoozedUntil ?? "")),
     childrenByParentKey,
   };
 }

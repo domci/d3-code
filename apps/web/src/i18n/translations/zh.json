@@ -2163,6 +2163,15 @@
   "c7c6c2345a741768": "访客请求",
   "c37d2b47b70c3f7c": "正在连接",
   "04ab29f86a91dd64": "计划已就绪",
+  "4b2b87fbafc5500a": [
+    "Snoozed (",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    ")"
+  ],
   "9e4394e5b89e57a1": "正在恢复你的会话…",
   "5579a5d039c6962c": "{count, plural, other {正在从旧版本迁移 {total} 个会话。迁移期间你可以继续工作。}}",
   "8117d2b1eaef9f82": [
@@ -11694,12 +11703,12 @@
   "9c73aa0c2e2b4e7d": "选择快捷键",
   "f249ff80891e5443": "Switch to dark mode",
   "40369e5934d94f8d": "Switch to light mode",
-  "300a948f90c4d75c": "后退",
-  "2a50e229df85d553": "前进",
-  "652f6999ffc8d3bc": "D3 Code 首页",
   "8e9626aa27cb188a": "issue",
   "0c53fef866977e24": "Board",
   "9d2fc1003e82feb1": "用量",
+  "300a948f90c4d75c": "后退",
+  "2a50e229df85d553": "前进",
+  "652f6999ffc8d3bc": "D3 Code 首页",
   "20283eb1dd6119f9": "{count, plural, other {{count} 个附件}}",
   "ffedb03b620f97a9": "未发送的草稿",
   "90a349d827d1dcf5": "丢弃草稿",
