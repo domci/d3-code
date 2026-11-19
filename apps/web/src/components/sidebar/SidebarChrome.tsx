@@ -1,21 +1,11 @@
-import {
-  ArrowLeftIcon,
-  ArrowRightIcon,
-  ChartNoAxesColumnIcon,
-  CodeXmlIcon,
-  KanbanIcon,
-  MoonIcon,
-  SettingsIcon,
-  SunIcon,
-} from "lucide-react";
+import { ArrowLeftIcon, ArrowRightIcon, ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { useGT } from "gt-react";
+import { T, useGT } from "gt-react";
 import { memo } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useAtomValue } from "@effect/atom-react";
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
-import { useTheme } from "../../hooks/useTheme";
 import { shortcutLabelForCommand } from "../../keybindings";
 import {
   navigateHistory,
@@ -45,7 +35,8 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { readPullRequestListPreferences } from "../pullRequest/pullRequestListPreferences";
 import { readIssueListPreferences } from "../issue/issueListPreferences";
 import { IssueGlyph } from "../issue/issuePresentation";
-import { isAppModalPage, isSidebarUtilityPage, useNavigateToMainApp } from "./mainAppLocation";
+import { isSidebarUtilityPage, useNavigateToMainApp } from "./mainAppLocation";
+import { ForkSidebarNav, ForkThemeToggle } from "./ForkSidebarNav";
 import { SidebarThreadUndoNotice } from "./SidebarThreadUndoNotice";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
@@ -102,41 +93,11 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
           </div>
         ) : null}
       </div>
-      <div className="relative z-10 shrink-0 [-webkit-app-region:no-drag]">
-        <ThemeToggle />
-      </div>
+      <ForkThemeToggle />
     </div>
   );
 });
 
-/** Always-visible light/dark switch in the sidebar titlebar. */
-function ThemeToggle() {
-  const { resolvedTheme, setAppearanceMode } = useTheme();
-  const gt = useGT();
-  const next = resolvedTheme === "dark" ? "light" : "dark";
-  const label = next === "dark" ? gt("Switch to dark mode") : gt("Switch to light mode");
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            type="button"
-            size="icon-xs"
-            variant="ghost"
-            aria-label={label}
-            onClick={() => setAppearanceMode(next)}
-          />
-        }
-      >
-        {resolvedTheme === "dark" ? <SunIcon /> : <MoonIcon />}
-      </TooltipTrigger>
-      <TooltipPopup side="bottom">{label}</TooltipPopup>
-    </Tooltip>
-  );
-}
-
-// Measures the brand at its titlebar inset, plus the header's right padding and the
-// sidebar border, so the sidebar minimum follows font size, zoom and macOS window controls.
 export function SidebarBrandWidthProbe({
   isElectron,
   onWidthChange,
@@ -245,28 +206,18 @@ function SidebarBrandMark({ onBackdrop }: { onBackdrop: boolean }) {
 function SidebarUtilityItem({
   icon,
   label,
-  active,
-  className,
   onClick,
 }: {
   icon: ReactNode;
   label: string;
-  active: boolean;
-  className?: string;
   onClick: () => void;
 }) {
   return (
-    <SidebarMenuItem className={cn("shrink-0", className)}>
+    <SidebarMenuItem className="shrink-0">
       <Tooltip>
         <TooltipTrigger
           render={
-            <SidebarMenuButton
-              aria-label={label}
-              aria-current={active ? "page" : undefined}
-              isActive={active}
-              onClick={onClick}
-              size="icon"
-            >
+            <SidebarMenuButton aria-label={label} onClick={onClick} size="icon">
               {icon}
             </SidebarMenuButton>
           }
@@ -277,18 +228,15 @@ function SidebarUtilityItem({
   );
 }
 
+// oxlint-disable-next-line no-unused-vars -- D3 renders ForkSidebarNav; kept so upstream edits merge cleanly
 const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const navigate = useNavigate();
   const navigateToMainApp = useNavigateToMainApp();
   const gt = useGT();
   const { isMobile, setOpenMobile } = useSidebar();
-  const pathname = useLocation({ select: (location) => location.pathname });
-  const isSettings = pathname.startsWith("/settings") || pathname.startsWith("/projects/");
-  const isPullRequests = pathname === "/pull-requests";
-  const isIssues = pathname === "/issues";
-  const isBoard = pathname === "/board";
-  const isUsage = pathname === "/usage";
-  const isCode = !isSidebarUtilityPage(pathname) && !isAppModalPage(pathname);
+  const isOnUtilityPage = useLocation({
+    select: (location) => isSidebarUtilityPage(location.pathname),
+  });
   const pullRequestsSupported = usePullRequestsSupported();
   const issuesSupported = useIssuesSupported();
   const closeMobileSidebar = () => {
@@ -302,10 +250,6 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
       to: "/pull-requests",
       search: readPullRequestListPreferences(),
     });
-  };
-  const handleBoardClick = () => {
-    closeMobileSidebar();
-    void navigate({ to: "/board" });
   };
   const handleIssuesClick = () => {
     closeMobileSidebar();
@@ -330,48 +274,44 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
 
   return (
     <SidebarMenu className="flex-row items-center">
-      <SidebarUtilityItem
-        icon={<CodeXmlIcon />}
-        label={gt("Threads")}
-        active={isCode}
-        onClick={handleBackClick}
-      />
-      {pullRequestsSupported ? (
-        <SidebarUtilityItem
-          icon={<PullRequestGlyph.pullRequest />}
-          label={gt("Pull requests")}
-          active={isPullRequests}
-          onClick={handlePullRequestsClick}
-        />
-      ) : null}
-      {issuesSupported ? (
-        <SidebarUtilityItem
-          icon={<IssueGlyph.issue />}
-          label={gt("Issues", { $context: "sidebar link to the list of issues" })}
-          active={isIssues}
-          onClick={handleIssuesClick}
-        />
-      ) : null}
-      <SidebarUtilityItem
-        icon={<KanbanIcon />}
-        label={gt("Board")}
-        active={isBoard}
-        onClick={handleBoardClick}
-      />
-      <SidebarUtilityItem
-        icon={<ChartNoAxesColumnIcon />}
-        label={gt("Usage")}
-        active={isUsage}
-        onClick={handleUsageClick}
-      />
+      {isOnUtilityPage ? (
+        <SidebarMenuItem className="min-w-0 flex-1">
+          <SidebarMenuButton onClick={handleBackClick}>
+            <ArrowLeftIcon />
+            <span>
+              <T>Back</T>
+            </span>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      ) : (
+        <>
+          <SidebarUtilityItem
+            icon={<SettingsIcon />}
+            label={gt("Settings")}
+            onClick={handleSettingsClick}
+          />
+          {pullRequestsSupported ? (
+            <SidebarUtilityItem
+              icon={<PullRequestGlyph.pullRequest />}
+              label={gt("Pull requests")}
+              onClick={handlePullRequestsClick}
+            />
+          ) : null}
+          {issuesSupported ? (
+            <SidebarUtilityItem
+              icon={<IssueGlyph.issue />}
+              label={gt("Issues", { $context: "sidebar link to the list of issues" })}
+              onClick={handleIssuesClick}
+            />
+          ) : null}
+          <SidebarUtilityItem
+            icon={<ChartNoAxesColumnIcon />}
+            label={gt("Usage")}
+            onClick={handleUsageClick}
+          />
+        </>
+      )}
       <SidebarThreadUndoNotice />
-      <SidebarUtilityItem
-        icon={<SettingsIcon />}
-        label={gt("Settings")}
-        active={isSettings}
-        className="ml-auto"
-        onClick={handleSettingsClick}
-      />
       <SidebarUpdatePill />
     </SidebarMenu>
   );
@@ -382,7 +322,7 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
     <SidebarFooter>
       <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />
-      <SidebarUtilityMenu />
+      <ForkSidebarNav />
     </SidebarFooter>
   );
 });
