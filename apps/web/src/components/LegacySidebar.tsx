@@ -212,19 +212,23 @@ import {
 } from "../threadSelectionStore";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import {
+  completeSidebarRouteReveal,
   deleteSelectedThreadEntries,
   resolveAdjacentThreadId,
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
+  pendingSidebarRouteReveal,
   resolveThreadLastVisitedAt,
   resolveThreadStatusPill,
   orderItemsByPreferredIds,
+  SidebarChromeFooter,
+  SidebarChromeHeader,
   sortSidebarV2ProjectGroups,
   useSidebarRowSubscriptionLease,
   useThreadJumpHintsVisible,
-  ThreadStatusPill,
-} from "./Sidebar.logic";
-import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
+  type SidebarRouteReveal,
+  type ThreadStatusPill,
+} from "./LegacySidebar.upstream";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useMediaQuery } from "~/hooks/useMediaQuery";
 import { CommandDialogTrigger } from "./ui/command";
@@ -244,11 +248,6 @@ import {
 } from "../sidebarProjectGrouping";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
-import {
-  completeSidebarRouteReveal,
-  pendingSidebarRouteReveal,
-  type SidebarRouteReveal,
-} from "./sidebar/routeReveal";
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
   updated_at: "Last user message",
   created_at: "Created at",

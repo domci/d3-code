@@ -9,7 +9,7 @@ import {
 } from "@t3tools/client-runtime/state/thread-sort";
 
 import type { SidebarThreadSummary } from "../types";
-import type { ThreadStatusPill } from "./Sidebar.logic";
+import type { ThreadStatusPill } from "./LegacySidebar.upstream";
 
 const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
 const SIDEBAR_THREAD_PREWARM_LIMIT = 3;
