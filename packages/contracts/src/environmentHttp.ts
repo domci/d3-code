@@ -511,13 +511,13 @@ export function formatConnectReachable(
 export const T3_CONNECT_TROUBLESHOOTING_SECTIONS = [
   "the-hosts-tunnel-is-offline",
   "port-7844-is-blocked-on-the-host",
-  "the-tunnel-works-but-t3-code-does-not-answer",
-  "the-t3-connect-address-does-not-resolve-or-answer",
-  "this-device-cant-reach-t3-connect",
+  "the-tunnel-works-but-d3-code-does-not-answer",
+  "the-d3-connect-address-does-not-resolve-or-answer",
+  "this-device-cant-reach-d3-connect",
   "sign-in-account-or-link-problems",
   "the-clock-is-off",
-  "the-host-runs-an-older-t3-code",
-  "t3-connect-returned-an-error",
+  "the-host-runs-an-older-d3-code",
+  "d3-connect-returned-an-error",
 ] as const;
 export type T3ConnectTroubleshootingSection = (typeof T3_CONNECT_TROUBLESHOOTING_SECTIONS)[number];
 
@@ -532,10 +532,10 @@ const REACHABILITY_SECTION = {
   connector_not_ready: "the-hosts-tunnel-is-offline",
   no_connector: "the-hosts-tunnel-is-offline",
   edge_unreachable: "port-7844-is-blocked-on-the-host",
-  origin_unreachable: "the-tunnel-works-but-t3-code-does-not-answer",
-  unexpected_response: "the-tunnel-works-but-t3-code-does-not-answer",
-  dns_failed: "the-t3-connect-address-does-not-resolve-or-answer",
-  timeout: "the-t3-connect-address-does-not-resolve-or-answer",
+  origin_unreachable: "the-tunnel-works-but-d3-code-does-not-answer",
+  unexpected_response: "the-tunnel-works-but-d3-code-does-not-answer",
+  dns_failed: "the-d3-connect-address-does-not-resolve-or-answer",
+  timeout: "the-d3-connect-address-does-not-resolve-or-answer",
 } satisfies Record<EnvironmentConnectReachabilityCause, T3ConnectTroubleshootingSection>;
 
 export function connectReachabilityHelpUrl(cause: EnvironmentConnectReachabilityCause): string {
