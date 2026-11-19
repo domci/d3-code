@@ -916,18 +916,32 @@ export interface ThreadSearchMatch {
   readonly groupQuality: number;
 }
 
+export type SearchMatchHintField =
+  | "pull-request"
+  | "branch"
+  | "project"
+  | "environment"
+  | "reference";
+
 export interface SearchMatchHint {
+  readonly field: SearchMatchHintField;
   readonly label: string;
   readonly text: string;
   readonly ranges: ReadonlyArray<SearchRange>;
 }
 
-// Most threads' branches start with the app's own worktree prefix ("t3/", and
-// "t3code/" before it), so "t3 connect" would match nearly every thread.
-// Only before more text, so typing "t3/" does not empty the list for a keystroke.
-// Branches made before the fork switched to its own prefix still start with "t3/".
+// Most branches start with the app's worktree prefix ("d3/", or "t3/" and "t3code/" from before
+// the fork, "<prefix>-<hex>" when a bare prefix branch blocks nested refs), so "d3 connect" would
+// match nearly every thread. Only before more text, so typing "d3/" does not empty the list.
 const WORKTREE_BRANCH_PREFIX_PATTERN = new RegExp(
-  `^(?:${WORKTREE_BRANCH_PREFIX}|t3|t3code)/(?=\\S)`,
+  `^(?:(?:${WORKTREE_BRANCH_PREFIX}|t3|t3code)/(?=\\S)|(?:${WORKTREE_BRANCH_PREFIX}|t3)-(?=[0-9a-f]{8}$))`,
+);
+
+// The flat prefix anywhere in a query, while its hex is still being typed, so
+// "d3-abcd" and "connect d3-abcd1234" still reach the stripped branch field.
+const FLAT_BRANCH_QUERY_PREFIX_PATTERN = new RegExp(
+  `(^| )(?:${WORKTREE_BRANCH_PREFIX}|t3)-(?=[0-9a-f]{1,8}(?: |$))`,
+  "g",
 );
 
 function searchableBranch(branch: string | null | undefined): string | null {
@@ -945,21 +959,26 @@ function matchHint(
   thread: ThreadSearchSubject,
   typos: boolean,
 ): SearchMatchHint | undefined {
-  const candidates: Array<{ readonly label: string; readonly text: string | null | undefined }> = [
+  const candidates: Array<{
+    readonly field: SearchMatchHintField;
+    readonly label: string;
+    readonly text: string | null | undefined;
+  }> = [
     ...(thread.pullRequests ?? []).map((pullRequest) => ({
+      field: "pull-request" as const,
       label: "PR",
       text: `#${pullRequest.number}${pullRequest.title ? ` ${pullRequest.title}` : ""}`,
     })),
-    { label: "Branch", text: searchableBranch(thread.branch) },
-    { label: "Project", text: thread.projectTitle },
-    { label: "Environment", text: thread.environmentLabel },
+    { field: "branch", label: "Branch", text: searchableBranch(thread.branch) },
+    { field: "project", label: "Project", text: thread.projectTitle },
+    { field: "environment", label: "Environment", text: thread.environmentLabel },
   ];
   const holds = (text: string, query: string) =>
     matchSearchFields(query, [{ value: text, weight: 1 }], { typos })?.primaryRanges;
   const hintFor = (query: string) => {
-    for (const { label, text } of candidates) {
+    for (const { field, label, text } of candidates) {
       const ranges = text ? holds(text, query) : undefined;
-      if (text && ranges) return { label, text, ranges };
+      if (text && ranges) return { field, label, text, ranges };
     }
     return undefined;
   };
@@ -1008,7 +1027,8 @@ function threadFieldQuery(normalizedQuery: string): string {
       fieldQuery: normalizedQuery
         .replace(/^(?:pr|pull request|pull)\s*(?=#?\d)/, "")
         .replace(/^#\s*/, "")
-        .replace(WORKTREE_BRANCH_PREFIX_PATTERN, ""),
+        .replace(WORKTREE_BRANCH_PREFIX_PATTERN, "")
+        .replace(FLAT_BRANCH_QUERY_PREFIX_PATTERN, "$1"),
     };
   }
   return lastFieldQuery.fieldQuery;
@@ -1051,7 +1071,7 @@ export function scoreThreadSearch(
     ? undefined
     : (): SearchMatchHint | undefined =>
         referenceMatch
-          ? { label: "ID or link", text: normalizedQuery, ranges: [] }
+          ? { field: "reference", label: "ID or link", text: normalizedQuery, ranges: [] }
           : (checkedHint ?? matchHint(fieldQuery, thread, typos));
   const pick = options?.picks === false ? undefined : activePick(thread, normalizedQuery, now);
   return {

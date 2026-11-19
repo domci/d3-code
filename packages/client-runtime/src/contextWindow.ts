@@ -115,9 +115,10 @@ export function deriveLatestContextWindowSnapshot(
         ? 0
         : DateTime.toEpochMillis(providerThread.updatedAt)
       : Date.parse(liveUsage.updatedAt);
+  // Usage reported before the compaction describes the context it just discarded.
   const newerCompaction =
     compaction?.type === "compaction" &&
-    DateTime.toEpochMillis(compaction.updatedAt) > usageUpdatedAt;
+    DateTime.toEpochMillis(compaction.completedAt ?? compaction.updatedAt) > usageUpdatedAt;
   if (liveUsage != null && !newerCompaction) {
     const usedTokens = Math.max(0, liveUsage.usedTokens);
     const maxTokens =
@@ -194,14 +195,19 @@ export function deriveLatestContextWindowSnapshot(
     if (usedTokens === null || usedTokens < 0) {
       return null;
     }
+    const reportedMax =
+      liveUsage?.maxTokens ?? asFiniteNumber(providerThread?.contextUsage?.maxTokens);
+    const maxTokens = reportedMax != null && reportedMax > 0 ? reportedMax : null;
+    const usedPercentage =
+      maxTokens !== null ? Math.min(100, (usedTokens / maxTokens) * 100) : null;
 
     return {
       usedTokens,
       totalProcessedTokens: asFiniteNumber(payload.beforeTokenCount),
-      maxTokens: null,
-      remainingTokens: null,
-      usedPercentage: null,
-      remainingPercentage: null,
+      maxTokens,
+      remainingTokens: maxTokens !== null ? Math.max(0, Math.round(maxTokens - usedTokens)) : null,
+      usedPercentage,
+      remainingPercentage: usedPercentage !== null ? Math.max(0, 100 - usedPercentage) : null,
       inputTokens: null,
       cachedInputTokens: null,
       outputTokens: null,

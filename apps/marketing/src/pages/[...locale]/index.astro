@@ -462,7 +462,8 @@ import {
     flex-shrink: 0;
   }
 
-  :global([data-platform="mac"]) .dl-icon--apple { display: block; }
+  :global([data-platform="mac"]) .dl-icon--apple,
+  :global([data-platform="ios"]) .dl-icon--apple { display: block; }
   :global([data-platform="win"]) .dl-icon--windows { display: block; }
   :global([data-platform="linux"]) .dl-icon--linux { display: block; }
   :global(html:not([data-platform])) .dl-icon--apple { display: block; }
@@ -895,5 +896,11 @@ import {
     section { padding: 64px 0; }
     .sec-cta { padding: 96px 0; }
     .container { padding-left: 20px; padding-right: 20px; }
+    /* A nowrap tag widens its column past the grid, which then clips the other column. */
+    .harness-tag { white-space: normal; }
+  }
+
+  @media (max-width: 360px) {
+    .harness { padding-left: 12px; padding-right: 12px; }
   }
 </style>

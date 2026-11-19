@@ -1,3 +1,5 @@
+// oxlint-disable t3code/no-untranslated-copy -- the fork tree sidebar predates i18n; its copy is translated in a follow-up.
+import { msg } from "gt-react";
 import type { ContextMenuItem } from "@t3tools/contracts";
 import type { SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import {
@@ -247,16 +249,16 @@ export function sortProjectsByCreation<T extends { readonly createdAt: string }>
     .map(({ project }) => project);
 }
 
-const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
-  "Pending Approval": 5,
-  "Awaiting Input": 4,
-  "Guest Request": 3.75,
-  Failed: 3.5,
-  Working: 3,
-  Connecting: 3,
-  Waiting: 2.5,
-  "Plan Ready": 2,
-  Completed: 1,
+const THREAD_STATUS_PRIORITY: Record<string, number> = {
+  [msg("Pending Approval")]: 5,
+  [msg("Awaiting Input")]: 4,
+  [msg("Guest Request")]: 3.75,
+  [msg("Failed")]: 3.5,
+  [msg("Working")]: 3,
+  [msg("Connecting")]: 3,
+  [msg("Waiting")]: 2.5,
+  [msg("Plan Ready")]: 2,
+  [msg("Completed")]: 1,
 };
 
 export function resolveProjectStatusIndicator(
@@ -267,7 +269,8 @@ export function resolveProjectStatusIndicator(
     if (status === null) continue;
     if (
       highestPriorityStatus === null ||
-      THREAD_STATUS_PRIORITY[status.label] > THREAD_STATUS_PRIORITY[highestPriorityStatus.label]
+      (THREAD_STATUS_PRIORITY[status.label] ?? 0) >
+        (THREAD_STATUS_PRIORITY[highestPriorityStatus.label] ?? 0)
     ) {
       highestPriorityStatus = status;
     }

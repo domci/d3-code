@@ -4,7 +4,7 @@ import { UsageRouteScreen } from "../../usage/UsageRouteScreen";
 import { BoardScreen } from "../../board/BoardScreen";
 
 export function WorkspaceExtraTab(props: {
-  tab: Exclude<NavigationTab, "threads" | "pullRequests">;
+  tab: Exclude<NavigationTab, "threads" | "pullRequests" | "issues">;
 }) {
   return (
     <>
