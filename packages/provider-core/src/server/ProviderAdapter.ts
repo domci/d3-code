@@ -832,6 +832,11 @@ export interface ProviderAdapterV2SessionRuntime {
 export interface ProviderAdapterV2Shape {
   readonly instanceId: ProviderInstanceId;
   readonly driver: ProviderDriverKind;
+  /**
+   * Set when `openSession` rates the version the runtime reports at its handshake. The host then
+   * skips its own check, which only knows the version from the last status probe.
+   */
+  readonly checksVersionAtHandshake?: boolean;
   readonly getCapabilities: () => Effect.Effect<
     OrchestrationV2ProviderCapabilities,
     ProviderAdapterV2Error

@@ -112,6 +112,9 @@ describe("V2 preview upgrade", () => {
         [98, "IssueTrackerBindings"],
         [99, "ActiveShellIndexIndexes"],
         [100, "BackgroundRecoveryIndexes"],
+        [101, "TurnStartReadIndexes"],
+        [102, "DelegatedTaskReadIndexes"],
+        [103, "ThreadItemCounts"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
       assert.deepStrictEqual(yield* sql`SELECT * FROM orchestration_v2_legacy_imports`, imports);
@@ -239,6 +242,9 @@ describe("V2 preview upgrade", () => {
         [98, "IssueTrackerBindings"],
         [99, "ActiveShellIndexIndexes"],
         [100, "BackgroundRecoveryIndexes"],
+        [101, "TurnStartReadIndexes"],
+        [102, "DelegatedTaskReadIndexes"],
+        [103, "ThreadItemCounts"],
       ]);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
