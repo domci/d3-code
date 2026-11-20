@@ -1,6 +1,6 @@
 # Merging upstream T3 Code
 
-D3 Code is a fork of [pingdotgg/t3code](https://github.com/pingdotgg/t3code) (remote `upstream`). Merge often: conflicts grow faster than the commit count. A weekly scheduled task prepares the merge on a branch; a maintainer fast-forwards `main`.
+D3 Code is a fork of [pingdotgg/t3code](https://github.com/pingdotgg/t3code) (remote `upstream`). Merge often: conflicts grow faster than the commit count. A weekly scheduled task (Sunday night) runs the merge, pushes `main` when checks pass, and rolls it out to the desktop app, Android app and live server.
 
 ## Steps
 
