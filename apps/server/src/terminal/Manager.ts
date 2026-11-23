@@ -47,6 +47,7 @@ import { SpawnExecutableResolution, mergePathEntries } from "@t3tools/shared/she
 
 import { acpRegistryManagedBinaryDirectories } from "@t3tools/provider-acp-registry/server";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
+import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Context from "effect/Context";
@@ -114,6 +115,13 @@ const CLOSE_IDLE_QUERY_TIMEOUT = { posix: "1 second", win32: "1500 millis" } as 
 const QUIET_SUBPROCESS_SNAPSHOT_EVERY_TICKS = 30;
 const DEFAULT_PROCESS_KILL_GRACE_MS = 1_000;
 const DEFAULT_MAX_RETAINED_INACTIVE_SESSIONS = 128;
+/**
+ * A running shell with no viewer, no command and no input or output for this long is
+ * closed. Each one holds a PTY and inotify instances (fish watches its universal
+ * variables); 100 abandoned thread shells used up a Linux user's 128 instances.
+ */
+const DEFAULT_ABANDONED_TERMINAL_CLOSE_MS = 30 * 60_000;
+const MAX_ABANDONED_TERMINAL_SWEEP_MS = 60_000;
 const DEFAULT_OPEN_COLS = 120;
 const DEFAULT_OPEN_ROWS = 30;
 // The tmux/screen/Zellij keys name the multiplexer pane that launched the server,
@@ -1707,6 +1715,8 @@ interface TerminalManagerOptions {
   subprocessPollIntervalMs?: number;
   processKillGraceMs?: number;
   maxRetainedInactiveSessions?: number;
+  /** Close an unwatched, quiet running shell after this long; 0 keeps it. */
+  abandonedTerminalCloseMs?: number;
   registerTerminalProcesses?: (input: {
     readonly threadId: string;
     readonly terminalId: string;
@@ -1953,6 +1963,8 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   const processKillGraceMs = options.processKillGraceMs ?? DEFAULT_PROCESS_KILL_GRACE_MS;
   const maxRetainedInactiveSessions =
     options.maxRetainedInactiveSessions ?? DEFAULT_MAX_RETAINED_INACTIVE_SESSIONS;
+  const abandonedTerminalCloseMs =
+    options.abandonedTerminalCloseMs ?? DEFAULT_ABANDONED_TERMINAL_CLOSE_MS;
   const registerTerminalProcesses = options.registerTerminalProcesses ?? (() => Effect.void);
   const unregisterTerminal = options.unregisterTerminal ?? (() => Effect.void);
 
@@ -3984,6 +3996,46 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           );
     return Option.isSome(yield* Effect.findFirst(running, isActive));
   });
+
+  // Only a settling thread closed its idle shells, and most threads never settle.
+  const quietSince = new WeakMap<
+    TerminalSessionState,
+    { readonly process: PtyAdapter.PtyProcess | null; readonly mark: number; readonly at: number }
+  >();
+  const closeAbandonedSessions = Effect.fn("terminal.closeAbandonedSessions")(function* () {
+    const now = yield* Clock.currentTimeMillis;
+    const state = yield* readManagerState;
+    const due: TerminalSessionState[] = [];
+    for (const session of state.sessions.values()) {
+      if (
+        session.status !== "running" ||
+        session.hasRunningSubprocess ||
+        terminalViewers.has(toSessionKey(session.threadId, session.terminalId))
+      ) {
+        quietSince.delete(session);
+        continue;
+      }
+      const mark = terminalActivityMark(session);
+      const quiet = quietSince.get(session);
+      if (quiet?.process !== session.process || quiet.mark !== mark) {
+        quietSince.set(session, { process: session.process, mark, at: now });
+      } else if (now - quiet.at >= abandonedTerminalCloseMs) {
+        due.push(session);
+      }
+    }
+    // closeIdle asks the process table again, so a command started meanwhile keeps it.
+    yield* Effect.forEach(
+      due,
+      (session) => closeIdle({ threadId: session.threadId, terminalId: session.terminalId }),
+      { discard: true },
+    );
+  });
+  if (abandonedTerminalCloseMs > 0) {
+    const sweepMs = Math.min(abandonedTerminalCloseMs, MAX_ABANDONED_TERMINAL_SWEEP_MS);
+    yield* Effect.forever(
+      closeAbandonedSessions().pipe(Effect.andThen(Effect.sleep(sweepMs))),
+    ).pipe(Effect.forkIn(workerScope));
+  }
 
   return TerminalManager.of({
     open,

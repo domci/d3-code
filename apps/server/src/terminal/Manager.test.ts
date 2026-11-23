@@ -258,6 +258,7 @@ interface CreateManagerOptions {
     typeof TerminalManager.makeWithOptions
   >[0]["registerTerminalProcesses"];
   maxRetainedInactiveSessions?: number;
+  abandonedTerminalCloseMs?: number;
   historyByteLimit?: number;
   ptyAdapter?: FakePtyAdapter;
   resolveProviderInstanceEnvironment?: Parameters<
@@ -314,6 +315,9 @@ const createManager = (
           : {}),
         ...(options.maxRetainedInactiveSessions !== undefined
           ? { maxRetainedInactiveSessions: options.maxRetainedInactiveSessions }
+          : {}),
+        ...(options.abandonedTerminalCloseMs !== undefined
+          ? { abandonedTerminalCloseMs: options.abandonedTerminalCloseMs }
           : {}),
         ...(options.resolveProviderInstanceEnvironment !== undefined
           ? { resolveProviderInstanceEnvironment: options.resolveProviderInstanceEnvironment }
@@ -1258,6 +1262,27 @@ it.layer(
         expect(ptyAdapter.processes[0]!.killed).toBe(false);
         yield* manager.close({ threadId: "thread-1" });
       }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("closes a shell nobody uses once it stays quiet, keeps one running a command", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager(5, {
+        abandonedTerminalCloseMs: 60_000,
+        processKillGraceMs: 0,
+        processTable: Effect.succeed([
+          { pid: 9000, ppid: 1, name: "zsh" },
+          { pid: 9001, ppid: 1, name: "zsh" },
+          { pid: 200, ppid: 9001, name: "node" },
+        ]),
+      }).pipe(Effect.provide(layerWithHostPlatform("linux")));
+      yield* manager.open(openInput({ terminalId: "idle" }));
+      yield* manager.open(openInput({ terminalId: "dev-server" }));
+
+      yield* TestClock.adjust("59 seconds");
+      expect(ptyAdapter.processes.map((process) => process.killed)).toEqual([false, false]);
+      yield* TestClock.adjust("2 minutes");
+      expect(ptyAdapter.processes.map((process) => process.killed)).toEqual([true, false]);
+    }).pipe(Effect.provide(TestClock.layer())),
   );
 
   it.effect("keeps terminals that get input or output while closeIdle checks them", () =>
